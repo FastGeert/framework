@@ -66,6 +66,26 @@ class MessageQueue(object):
     The reponse parameter cannot be None. If for example an action must be taken for which None is a valid return value, it must
     be part of a response data structure, for example {'success': True, 'data': None}. Making use of such "success" flag is a good
     idea anyway, since there should be a way of exception handling as well.
+
+    Example usages below
+
+    Consuming side:
+
+        from ... import MessageQueue
+        for message in MessageQueue.watch('myqueue'):
+            print message.request
+            message.response = 'Response to {0}!'.format(message.request)
+            MessageQueue.respond(message)
+            # This for-loop is never ending, it will yield new messages as they arrive
+
+    Sending side:
+
+        from ... import MessageQueue
+        token = MessageQueue.request('myqueue', 'foobar')
+        response = MessageQueue.wait(token)  # Optional, an acknowledge=True flag can be passed as well
+        # The above line will block until the request is answered
+        print response  # Prints 'Response to foobar!
+        MessageQueue.acknowledge(token)
     """
 
     QUEUES = '/ovs/queues/{0}'
