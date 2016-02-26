@@ -554,6 +554,17 @@ define(['jquery', 'jqp/pnotify'], function($) {
             }
         });
     }
+    function log(message, severity) {
+        if (window.console) {
+            if (severity === 'info' || severity === null || severity === undefined) {
+                console.log(message);
+            } else if (severity === 'warning') {
+                console.warn(message);
+            } else if (severity === 'error') {
+                console.error(message);
+            }
+        }
+    }
 
     Array.prototype.equals = function(array) {
         return arrayEquals(this, array);
@@ -618,6 +629,7 @@ define(['jquery', 'jqp/pnotify'], function($) {
         activateHook: activateHook,
         deactivateHook: deactivateHook,
         loadHookElements: loadHookElements,
-        unloadHookElements: unloadHookElements
+        unloadHookElements: unloadHookElements,
+        log: log
     };
 });

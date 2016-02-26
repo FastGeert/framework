@@ -22,7 +22,8 @@ define([
         var self = this;
 
         // Variables
-        self.data = data;
+        self.data   = data;
+        self.shared = shared;
 
         // Computed
         self.canContinue = ko.computed(function() {
@@ -40,51 +41,53 @@ define([
                         connection_port: self.data.port(),
                         connection_username: self.data.accesskey(),
                         connection_password: self.data.secretkey(),
-                        connection_backend: {'backend': (self.data.backend() === 'alba' && self.data.albaBackend() !== undefined ? self.data.albaBackend().guid : undefined),
+                        connection_backend: {'backend': (self.data.backend() === 'alba' && self.data.albaBackend() !== undefined ? self.data.albaBackend().guid() : undefined),
                                              'metadata': (self.data.backend() === 'alba' && self.data.albaPreset() !== undefined ? self.data.albaPreset().name : undefined)},
                         storage_ip: self.data.storageIP(),
                         integratemgmt: self.data.integratemgmt(),
                         readcache_size: self.data.readCacheSize(),
-                        writecache_size: self.data.writeCacheSize()
+                        writecache_size: self.data.writeCacheSize(),
+                        config_params: {
+                            'dtl_mode': self.data.dtlMode().name,
+                            'sco_size': self.data.scoSize(),
+                            'dedupe_mode': self.data.dedupeMode(),
+                            'write_buffer': self.data.writeBuffer(),
+                            'dtl_transport': self.data.dtlTransportMode().name,
+                            'cache_strategy': self.data.cacheStrategy()
+                        }
                     }
                 };
-                var configParams = undefined;
-                if (self.data.extendVpool() === false) {
-                    configParams = {
-                        'dtl_mode': self.data.dtlMode(),
-                        'sco_size': self.data.scoSize(),
-                        'dedupe_mode': self.data.dedupeMode(),
-                        'dtl_enabled': self.data.dtlEnabled(),
-                        'dtl_location': self.data.dtlLocation(),
-                        'write_buffer': self.data.writeBuffer(),
-                        'dtl_transport': self.data.dtlTransportMode().name,
-                        'cache_strategy': self.data.cacheStrategy()
-                    }
-                }
+
                 if (self.data.backend() === 'distributed') {
                     post_data.call_parameters.distributed_mountpoint = self.data.distributedMtpt();
                 }
-                post_data.call_parameters.config_params = configParams;
-                var target_guid;
-                if (self.data.extendVpool() === true) {
-                    target_guid = self.data.storageRouter().guid()
+                if (data.vPoolAdd() === true) {
+                    generic.alertInfo($.t('ovs:wizards.add_vpool.confirm.started'), $.t('ovs:wizards.add_vpool.confirm.in_progress', { what: self.data.name() }));
                 } else {
-                    target_guid = self.data.target().guid()
+                    generic.alertInfo($.t('ovs:wizards.extend_vpool.confirm.started'), $.t('ovs:wizards.extend_vpool.confirm.in_progress', { what: self.data.name() }));
                 }
-                api.post('storagerouters/' + target_guid + '/add_vpool', { data: post_data })
-                        .then(shared.tasks.wait)
-                        .done(function() {
-                            generic.alertSuccess($.t('ovs:generic.saved'), $.t('ovs:wizards.addvpool.confirm.success', { what: self.data.name() }));
-                        })
-                        .fail(function() {
-                            generic.alertError($.t('ovs:generic.error'), $.t('ovs:generic.messages.errorwhile', { what: $.t('ovs:wizards.addvpool.confirm.creating') }));
-                        })
-                        .always(function() {
-                            if (self.data.completed !== undefined) {
-                                self.data.completed.resolve(true);
-                            }
-                        });
-                generic.alertInfo($.t('ovs:wizards.addvpool.confirm.started'), $.t('ovs:wizards.addvpool.confirm.inprogress', { what: self.data.name() }));
+                api.post('storagerouters/' + self.data.target().guid() + '/add_vpool', { data: post_data })
+                    .then(self.shared.tasks.wait)
+                    .done(function() {
+                        if (data.vPoolAdd() === true) {
+                            generic.alertSuccess($.t('ovs:generic.saved'), $.t('ovs:wizards.add_vpool.confirm.success', { what: self.data.name() }));
+                        } else {
+                            generic.alertSuccess($.t('ovs:generic.saved'), $.t('ovs:wizards.extend_vpool.confirm.success', { what: self.data.name() }));
+                        }
+                        if (self.data.completed !== undefined) {
+                            self.data.completed.resolve(true);
+                        }
+                    })
+                    .fail(function() {
+                        if (data.vPoolAdd() === true) {
+                            generic.alertError($.t('ovs:generic.error'), $.t('ovs:generic.messages.errorwhile', { what: $.t('ovs:wizards.add_vpool.confirm.creating') }));
+                        } else {
+                            generic.alertError($.t('ovs:generic.error'), $.t('ovs:generic.messages.errorwhile', { what: $.t('ovs:wizards.extend_vpool.confirm.extending') }));
+                        }
+                        if (self.data.completed !== undefined) {
+                            self.data.completed.resolve(false);
+                        }
+                    });
                 deferred.resolve();
             }).promise();
         };

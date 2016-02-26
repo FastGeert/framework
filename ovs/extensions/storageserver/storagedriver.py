@@ -19,11 +19,12 @@ Wrapper class for the storagedriver client of the voldrv team
 import os
 import json
 import copy
-from ovs.extensions.generic.configuration import Configuration
+from ovs.extensions.db.etcd.configuration import EtcdConfiguration
 from ovs.extensions.generic.remote import Remote
 from ovs.log.logHandler import LogHandler
 from volumedriver.storagerouter import storagerouterclient
 from volumedriver.storagerouter.storagerouterclient import ClusterContact
+from volumedriver.storagerouter.storagerouterclient import DTLMode
 from volumedriver.storagerouter.storagerouterclient import LocalStorageRouterClient as LSRClient
 from volumedriver.storagerouter.storagerouterclient import MDSClient
 from volumedriver.storagerouter.storagerouterclient import MDSNodeConfig
@@ -48,20 +49,21 @@ class StorageDriverClient(object):
     """
     Client to access storagedriver client
     """
-    VOLDRV_DTL_SYNC = ''
-    VOLDRV_DTL_ASYNC = ''
-    VOLDRV_DTL_NOSYNC = ''
+    VOLDRV_DTL_SYNC = 'Synchronous'
+    VOLDRV_DTL_ASYNC = 'Asynchronous'
     VOLDRV_NO_CACHE = 'NoCache'
     VOLDRV_CACHE_ON_READ = 'CacheOnRead'
     VOLDRV_CONTENT_BASED = 'ContentBased'
     VOLDRV_CACHE_ON_WRITE = 'CacheOnWrite'
     VOLDRV_LOCATION_BASED = 'LocationBased'
+    VOLDRV_DTL_MANUAL_MODE = 'Manual'
+    VOLDRV_DTL_AUTOMATIC_MODE = 'Automatic'
     VOLDRV_DTL_TRANSPORT_TCP = 'TCP'
     VOLDRV_DTL_TRANSPORT_RSOCKET = 'RSocket'
 
     FRAMEWORK_DTL_SYNC = 'sync'
-    FRAMEWORK_DTL_ASYNC = 'async'
-    FRAMEWORK_DTL_NOSYNC = 'no_sync'
+    FRAMEWORK_DTL_ASYNC = 'a_sync'
+    FRAMEWORK_DTL_NO_SYNC = 'no_sync'
     FRAMEWORK_NO_CACHE = 'none'
     FRAMEWORK_CACHE_ON_READ = 'on_read'
     FRAMEWORK_CONTENT_BASED = 'dedupe'
@@ -80,12 +82,12 @@ class StorageDriverClient(object):
                         FRAMEWORK_LOCATION_BASED: ReadCacheMode.LOCATION_BASED}
     VPOOL_DEDUPE_MAP = {FRAMEWORK_CONTENT_BASED: VOLDRV_CONTENT_BASED,
                         FRAMEWORK_LOCATION_BASED: VOLDRV_LOCATION_BASED}
-    VDISK_DTL_MODE_MAP = {FRAMEWORK_DTL_SYNC: '',
-                          FRAMEWORK_DTL_ASYNC: '',
-                          FRAMEWORK_DTL_NOSYNC: ''}
+    VDISK_DTL_MODE_MAP = {FRAMEWORK_DTL_SYNC: DTLMode.SYNCHRONOUS,
+                          FRAMEWORK_DTL_ASYNC: DTLMode.ASYNCHRONOUS,
+                          FRAMEWORK_DTL_NO_SYNC: None}
     VPOOL_DTL_MODE_MAP = {FRAMEWORK_DTL_SYNC: VOLDRV_DTL_SYNC,
                           FRAMEWORK_DTL_ASYNC: VOLDRV_DTL_ASYNC,
-                          FRAMEWORK_DTL_NOSYNC: VOLDRV_DTL_NOSYNC}
+                          FRAMEWORK_DTL_NO_SYNC: None}
     VPOOL_DTL_TRANSPORT_MAP = {FRAMEWORK_DTL_TRANSPORT_TCP: VOLDRV_DTL_TRANSPORT_TCP,
                                FRAMEWORK_DTL_TRANSPORT_RSOCKET: VOLDRV_DTL_TRANSPORT_RSOCKET}
     REVERSE_CACHE_MAP = {VOLDRV_NO_CACHE: FRAMEWORK_NO_CACHE,
@@ -100,10 +102,8 @@ class StorageDriverClient(object):
                           ReadCacheMode.LOCATION_BASED: FRAMEWORK_LOCATION_BASED}
     REVERSE_DTL_MODE_MAP = {VOLDRV_DTL_SYNC: FRAMEWORK_DTL_SYNC,
                             VOLDRV_DTL_ASYNC: FRAMEWORK_DTL_ASYNC,
-                            VOLDRV_DTL_NOSYNC: FRAMEWORK_DTL_NOSYNC,
-                            '': FRAMEWORK_DTL_SYNC,
-                            '': FRAMEWORK_DTL_ASYNC,
-                            '': FRAMEWORK_DTL_NOSYNC}
+                            DTLMode.SYNCHRONOUS: FRAMEWORK_DTL_SYNC,
+                            DTLMode.ASYNCHRONOUS: FRAMEWORK_DTL_ASYNC}
     REVERSE_DTL_TRANSPORT_MAP = {VOLDRV_DTL_TRANSPORT_TCP: FRAMEWORK_DTL_TRANSPORT_TCP,
                                  VOLDRV_DTL_TRANSPORT_RSOCKET: FRAMEWORK_DTL_TRANSPORT_RSOCKET}
     TLOG_MULTIPLIER_MAP = {4: 16,
@@ -195,9 +195,9 @@ class StorageDriverConfiguration(object):
     # DO NOT MAKE MANUAL CHANGES HERE
 
     parameters = {
-        # hg branch: dev
-        # hg revision: 63d8c887a77f44365f8258a78caf889cbf5fd2bc
-        # buildTime: Mon Oct 12 08:55:42 UTC 2015
+        # hg branch: (detached
+        # hg revision: 814b426b74e7aaa0917336e307f455af656d37bd
+        # buildTime: Wed Jan 27 16:57:38 UTC 2016
         'metadataserver': {
             'backend_connection_manager': {
                 'optional': ['backend_connection_pool_capacity', 'backend_type', 's3_connection_host', 's3_connection_port', 's3_connection_username', 's3_connection_password', 's3_connection_verbose_logging', 's3_connection_use_ssl', 's3_connection_ssl_verify_host', 's3_connection_ssl_cert_file', 's3_connection_flavour', 'alba_connection_host', 'alba_connection_port', 'alba_connection_timeout', 'alba_connection_preset', ],
@@ -213,6 +213,10 @@ class StorageDriverConfiguration(object):
                 'optional': ['backend_connection_pool_capacity', 'backend_type', 's3_connection_host', 's3_connection_port', 's3_connection_username', 's3_connection_password', 's3_connection_verbose_logging', 's3_connection_use_ssl', 's3_connection_ssl_verify_host', 's3_connection_ssl_cert_file', 's3_connection_flavour', 'alba_connection_host', 'alba_connection_port', 'alba_connection_timeout', 'alba_connection_preset', ],
                 'mandatory': ['local_connection_path', ]
             },
+            'backend_garbage_collector': {
+                'optional': ['bgc_threads', ],
+                'mandatory': []
+            },
             'content_addressed_cache': {
                 'optional': ['serialize_read_cache', 'clustercache_mount_points', ],
                 'mandatory': ['read_cache_serialization_path', ]
@@ -225,16 +229,16 @@ class StorageDriverConfiguration(object):
                 'optional': ['dls_type', 'dls_arakoon_timeout_ms', 'dls_arakoon_cluster_id', 'dls_arakoon_cluster_nodes', ],
                 'mandatory': []
             },
-            'failovercache': {
-                'optional': ['failovercache_transport', ],
-                'mandatory': ['failovercache_path', ]
+            'distributed_transaction_log': {
+                'optional': ['dtl_transport', ],
+                'mandatory': ['dtl_path', ]
             },
             'file_driver': {
                 'optional': ['fd_extent_cache_capacity', ],
                 'mandatory': ['fd_cache_path', 'fd_namespace', ]
             },
             'filesystem': {
-                'optional': ['fs_ignore_sync', 'fs_raw_disk_suffix', 'fs_max_open_files', 'fs_file_event_rules', 'fs_metadata_backend_type', 'fs_metadata_backend_arakoon_cluster_id', 'fs_metadata_backend_arakoon_cluster_nodes', 'fs_metadata_backend_mds_nodes', 'fs_metadata_backend_mds_apply_relocations_to_slaves', 'fs_cache_dentries', 'fs_dtl_config_mode', 'fs_dtl_host', 'fs_dtl_port', 'fs_dtl_mode', ],
+                'optional': ['fs_ignore_sync', 'fs_raw_disk_suffix', 'fs_max_open_files', 'fs_file_event_rules', 'fs_metadata_backend_type', 'fs_metadata_backend_arakoon_cluster_id', 'fs_metadata_backend_arakoon_cluster_nodes', 'fs_metadata_backend_mds_nodes', 'fs_metadata_backend_mds_apply_relocations_to_slaves', 'fs_metadata_backend_mds_timeout_secs', 'fs_cache_dentries', 'fs_dtl_config_mode', 'fs_dtl_host', 'fs_dtl_port', 'fs_dtl_mode', 'fs_enable_shm_interface', ],
                 'mandatory': ['fs_virtual_disk_format', ]
             },
             'metadata_server': {
@@ -245,12 +249,20 @@ class StorageDriverConfiguration(object):
                 'optional': [],
                 'mandatory': ['trigger_gap', 'backoff_gap', 'scocache_mount_points', ]
             },
+            'scrub_manager': {
+                'optional': ['scrub_manager_interval', 'scrub_manager_sync_wait_secs', ],
+                'mandatory': []
+            },
+            'shm_server': {
+                'optional': [],
+                'mandatory': []
+            },
             'threadpool_component': {
                 'optional': ['num_threads', ],
                 'mandatory': []
             },
             'volume_manager': {
-                'optional': ['open_scos_per_volume', 'foc_throttle_usecs', 'foc_queue_depth', 'foc_write_trigger', 'sap_persist_interval', 'failovercache_check_interval_in_seconds', 'read_cache_default_behaviour', 'read_cache_default_mode', 'required_tlog_freespace', 'required_meta_freespace', 'freespace_check_interval', 'number_of_scos_in_tlog', 'non_disposable_scos_factor', 'debug_metadata_path', 'arakoon_metadata_sequence_size', ],
+                'optional': ['open_scos_per_volume', 'foc_throttle_usecs', 'foc_queue_depth', 'foc_write_trigger', 'sap_persist_interval', 'dtl_check_interval_in_seconds', 'read_cache_default_behaviour', 'read_cache_default_mode', 'required_tlog_freespace', 'required_meta_freespace', 'freespace_check_interval', 'number_of_scos_in_tlog', 'non_disposable_scos_factor', 'metadata_cache_capacity', 'debug_metadata_path', 'arakoon_metadata_sequence_size', ],
                 'mandatory': ['metadata_path', 'tlog_path', 'clean_interval', ]
             },
             'volume_registry': {
@@ -268,7 +280,7 @@ class StorageDriverConfiguration(object):
         },
     }
 
-    def __init__(self, config_type, vpool_name, number=None):
+    def __init__(self, config_type, vpool_guid, storagedriver_id):
         """
         Initializes the class
         """
@@ -280,20 +292,15 @@ class StorageDriverConfiguration(object):
             """
             return lambda **kwargs: self._add(sct, **kwargs)
 
-        if config_type not in ['storagedriver', 'metadataserver']:
-            raise RuntimeError('Invalid configuration type. Allowed: storagedriver, metadataserver')
+        if config_type != 'storagedriver':
+            raise RuntimeError('Invalid configuration type. Allowed: storagedriver')
         self.config_type = config_type
-        self.vpool_name = vpool_name
         self.configuration = {}
+        self.path = '/ovs/vpools/{0}/hosts/{1}/config/{{0}}'.format(vpool_guid, storagedriver_id)
+        self.remote_path = 'etcd://127.0.0.1:2379{0}'.format(self.path.format('')).strip('/')
         self.is_new = True
         self.dirty_entries = []
-        self.number = number
         self.params = copy.deepcopy(StorageDriverConfiguration.parameters)  # Never use parameters directly
-        self.base_path = '{0}/storagedriver/{1}'.format(Configuration.get('ovs.core.cfgdir'), self.config_type)
-        if self.number is None:
-            self.path = '{0}/{1}.json'.format(self.base_path, self.vpool_name)
-        else:
-            self.path = '{0}/{1}_{2}.json'.format(self.base_path, self.vpool_name, self.number)
         # Fix some manual "I know what I'm doing" overrides
         backend_connection_manager = 'backend_connection_manager'
         self.params[self.config_type][backend_connection_manager]['optional'].append('s3_connection_strict_consistency')
@@ -301,29 +308,19 @@ class StorageDriverConfiguration(object):
         for section in self.params[self.config_type]:
             setattr(self, 'configure_{0}'.format(section), make_configure(section))
 
-    def load(self, client=None):
+    def load(self):
         """
         Loads the configuration from a given file, optionally a remote one
-        :param client: If provided, load remote configuration
         """
-        contents = '{}'
-        if client is None:
-            if os.path.isfile(self.path):
-                logger.debug('Loading file {0}'.format(self.path))
-                with open(self.path, 'r') as config_file:
-                    contents = config_file.read()
-                    self.is_new = False
-            else:
-                logger.debug('Could not find file {0}, a new one will be created'.format(self.path))
+        self.configuration = {}
+        if EtcdConfiguration.dir_exists(self.path.format('')):
+            self.is_new = False
+            for key in self.params[self.config_type]:
+                if EtcdConfiguration.exists(self.path.format(key)):
+                    self.configuration[key] = json.loads(EtcdConfiguration.get(self.path.format(key), raw=True))
         else:
-            if client.file_exists(self.path):
-                logger.debug('Loading file {0}'.format(self.path))
-                contents = client.file_read(self.path)
-                self.is_new = False
-            else:
-                logger.debug('Could not find file {0}, a new one will be created'.format(self.path))
+            logger.debug('Could not find config {0}, a new one will be created'.format(self.path.format('')))
         self.dirty_entries = []
-        self.configuration = json.loads(contents)
 
     def save(self, client=None, reload_config=True):
         """
@@ -332,24 +329,18 @@ class StorageDriverConfiguration(object):
         :param reload_config: Reload the running Storage Driver configuration
         """
         self._validate()
-        contents = json.dumps(self.configuration, indent=2)
-        if client is None:
-            if not os.path.exists(self.base_path):
-                os.makedirs(self.base_path)
-            with open(self.path, 'w') as config_file:
-                config_file.write(contents)
-        else:
-            client.dir_create(self.base_path)
-            client.file_write(self.path, contents)
+        for key in self.configuration:
+            contents = json.dumps(self.configuration[key], indent=4)
+            EtcdConfiguration.set(self.path.format(key), contents, raw=True)
         if self.config_type == 'storagedriver' and reload_config is True:
             if len(self.dirty_entries) > 0:
                 if client is None:
                     logger.info('Applying local storagedriver configuration changes')
-                    changes = LSRClient(self.path).update_configuration(self.path)
+                    changes = LSRClient(self.remote_path).update_configuration(self.remote_path)
                 else:
                     logger.info('Applying storagedriver configuration changes on {0}'.format(client.ip))
                     with Remote(client.ip, [LSRClient]) as remote:
-                        changes = copy.deepcopy(remote.LocalStorageRouterClient(self.path).update_configuration(self.path))
+                        changes = copy.deepcopy(remote.LocalStorageRouterClient(self.remote_path).update_configuration(self.remote_path))
                 for change in changes:
                     if change['param_name'] not in self.dirty_entries:
                         raise RuntimeError('Unexpected configuration change: {0}'.format(change['param_name']))
@@ -442,8 +433,9 @@ class StorageDriverConfiguration(object):
 class GaneshaConfiguration:
 
     def __init__(self):
-        self._config_corefile = os.path.join(Configuration.get('ovs.core.cfgdir'), 'templates', 'ganesha-core.conf')
-        self._config_exportfile = os.path.join(Configuration.get('ovs.core.cfgdir'), 'templates', 'ganesha-export.conf')
+        config_dir = EtcdConfiguration.get('/ovs/framework/paths|cfgdir')
+        self._config_corefile = os.path.join(config_dir, 'templates', 'ganesha-core.conf')
+        self._config_exportfile = os.path.join(config_dir, 'templates', 'ganesha-export.conf')
 
     def generate_config(self, target_file, params):
         with open(self._config_corefile, 'r') as core_config_file:

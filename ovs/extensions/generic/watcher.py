@@ -16,9 +16,9 @@
 import sys
 import time
 import uuid
-import os
 import logging
 from ovs.log.logHandler import LogHandler
+from ovs.extensions.storage.persistentfactory import PersistentFactory
 
 logger = LogHandler.get('extensions', name='watcher')
 
@@ -32,6 +32,11 @@ def _log(log_target, entry, level):
 
 
 def services_running(target):
+    """
+    Check all services are running
+    :param target: Target to check
+    :return: Boolean
+    """
     try:
         key = 'ovs-watcher-{0}'.format(str(uuid.uuid4()))
         value = str(time.time())
@@ -73,8 +78,6 @@ def services_running(target):
                 try:
                     try:
                         logging.disable(logging.WARNING)
-                        from ovs.extensions.storage.persistentfactory import PersistentFactory
-                        PersistentFactory.store = None
                         persistent = PersistentFactory.get_client()
                         persistent.set(key, value)
                         if persistent.get(key) == value:
@@ -100,9 +103,8 @@ def services_running(target):
             tries = 0
             while tries < max_tries:
                 try:
-                    from ovs.extensions.db.arakoon.ArakoonManagement import ArakoonManagementEx
-                    cluster = ArakoonManagementEx().getCluster('voldrv')
-                    client = cluster.getClient()
+                    from ovs.extensions.storage.persistent.pyrakoonstore import PyrakoonStore
+                    client = PyrakoonStore('voldrv')
                     client.set(key, value)
                     if client.get(key) == value:
                         client.delete(key)
@@ -122,18 +124,14 @@ def services_running(target):
             # RabbitMQ
             _log(target, 'Test rabbitMQ...', 0)
             import pika
-            from ConfigParser import RawConfigParser
-            from ovs.extensions.generic.configuration import Configuration
-            rmq_ini = RawConfigParser()
-            rmq_ini.read(os.path.join(Configuration.get('ovs.core.cfgdir'), 'rabbitmqclient.cfg'))
-            rmq_nodes = [node.strip() for node in rmq_ini.get('main', 'nodes').split(',')]
-            rmq_servers = map(lambda n: rmq_ini.get(n, 'location'), rmq_nodes)
+            from ovs.extensions.db.etcd.configuration import EtcdConfiguration
+            rmq_servers = EtcdConfiguration.get('/ovs/framework/messagequeue|endpoints')
             good_node = False
             for server in rmq_servers:
                 try:
-                    connection_string = '{0}://{1}:{2}@{3}/%2F'.format(Configuration.get('ovs.core.broker.protocol'),
-                                                                       Configuration.get('ovs.core.broker.login'),
-                                                                       Configuration.get('ovs.core.broker.password'),
+                    connection_string = '{0}://{1}:{2}@{3}/%2F'.format(EtcdConfiguration.get('/ovs/framework/messagequeue|protocol'),
+                                                                       EtcdConfiguration.get('/ovs/framework/messagequeue|user'),
+                                                                       EtcdConfiguration.get('/ovs/framework/messagequeue|password'),
                                                                        server)
                     connection = pika.BlockingConnection(pika.URLParameters(connection_string))
                     channel = connection.channel()
@@ -147,7 +145,7 @@ def services_running(target):
                 _log(target, '  No working rabbitMQ node could be found', 2)
                 return False
             _log(target, '  RabbitMQ test OK', 0)
-            _log(target, 'All tests OK', 1)
+            _log(target, 'All tests OK', 0)
             return True
     except Exception as ex:
         _log(target, 'Unexpected exception: {0}'.format(ex), 2)

@@ -12,12 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from subprocess import check_output, CalledProcessError, PIPE, Popen
-from ConfigParser import RawConfigParser
-from ovs.log.logHandler import LogHandler
-from ovs.dal.hybrids.storagerouter import StorageRouter
-from ovs.dal.helpers import Descriptor
-
 import os
 import re
 import grp
@@ -30,6 +24,11 @@ import logging
 import tempfile
 import paramiko
 import socket
+from subprocess import check_output, CalledProcessError, PIPE, Popen
+from ovs.dal.helpers import Descriptor
+from ovs.dal.hybrids.storagerouter import StorageRouter
+from ovs.extensions.generic.remote import Remote
+from ovs.log.logHandler import LogHandler
 
 logger = LogHandler.get('extensions', name='sshclient')
 
@@ -39,29 +38,30 @@ def connected():
     Makes sure a call is executed against a connected client if required
     """
 
-    def wrap(f):
+    def wrap(outer_function):
         """
         Wrapper function
+        :param outer_function: Function to wrap
         """
 
-        def new_function(self, *args, **kwargs):
+        def inner_function(self, *args, **kwargs):
             """
             Wrapped function
-
+            :param self
             """
             try:
                 if self.client is not None and not self.client.is_connected():
                     self._connect()
-                return f(self, *args, **kwargs)
+                return outer_function(self, *args, **kwargs)
             except AttributeError as ex:
                 if "'NoneType' object has no attribute 'open_session'" in str(ex):
                     self._connect()  # Reconnect
-                    return f(self, *args, **kwargs)
+                    return outer_function(self, *args, **kwargs)
                 raise
 
-        new_function.__name__ = f.__name__
-        new_function.__module__ = f.__module__
-        return new_function
+        inner_function.__name__ = outer_function.__name__
+        inner_function.__module__ = outer_function.__module__
+        return inner_function
 
     return wrap
 
@@ -69,11 +69,15 @@ def connected():
 def is_connected(self):
     """
     Monkey-patch method to check whether the Paramiko client is connected
+    :param self
     """
     return self._transport is not None
 
 
 class UnableToConnectException(Exception):
+    """
+    Custom exception thrown when client cannot connect to remote side
+    """
     pass
 
 
@@ -103,7 +107,7 @@ class SSHClient(object):
 
         self.ip = ip
         local_ips = check_output("ip a | grep 'inet ' | sed 's/\s\s*/ /g' | cut -d ' ' -f 3 | cut -d '/' -f 1", shell=True).strip().splitlines()
-        self.local_ips = [ip.strip() for ip in local_ips]
+        self.local_ips = [lip.strip() for lip in local_ips]
         self.is_local = self.ip in self.local_ips
 
         if self.is_local is False and storagerouter is not None:
@@ -177,14 +181,18 @@ class SSHClient(object):
         self.client.close()
 
     @staticmethod
-    def _shell_safe(path_to_check):
-        """Makes sure that the given path/string is escaped and safe for shell"""
+    def shell_safe(path_to_check):
+        """
+        Makes sure that the given path/string is escaped and safe for shell
+        :param path_to_check: Path to make safe for shell
+        """
         return "".join([("\\" + _) if _ in " '\";`|" else _ for _ in path_to_check])
 
     @connected()
-    def run(self, command, debug=False):
+    def run(self, command, debug=False, suppress_logging=False):
         """
         Executes a shell command
+        :param suppress_logging: Do not log anything
         :param command: Command to execute
         :param debug: Extended logging and stderr output returned
         """
@@ -193,18 +201,24 @@ class SSHClient(object):
                 try:
                     process = Popen(command, stdout=PIPE, stderr=PIPE, shell=True)
                 except OSError as ose:
-                    logger.error('Command: "{0}" failed with output: "{1}"'.format(command, str(ose)))
+                    if suppress_logging is False:
+                        logger.error('Command: "{0}" failed with output: "{1}"'.format(command, str(ose)))
                     raise CalledProcessError(1, command, str(ose))
                 out, err = process.communicate()
+                out = out.replace(u'\u2018', u'"').replace(u'\u2019', u'"')
+                err = err.replace(u'\u2018', u'"').replace(u'\u2019', u'"')
+                exit_code = process.returncode
+                if exit_code != 0:  # Raise same error as check_output
+                    raise CalledProcessError(exit_code, command, err)
                 if debug:
                     logger.debug('stdout: {0}'.format(out))
                     logger.debug('stderr: {0}'.format(err))
                     return out.strip(), err
                 else:
                     return out.strip()
-
             except CalledProcessError as cpe:
-                logger.error('Command: "{0}" failed with output: "{1}"'.format(command, cpe.output))
+                if suppress_logging is False:
+                    logger.error('Command: "{0}" failed with output: "{1}"'.format(command, cpe.output))
                 raise cpe
         else:
             _, stdout, stderr = self.client.exec_command(command)  # stdin, stdout, stderr
@@ -212,7 +226,8 @@ class SSHClient(object):
             if exit_code != 0:  # Raise same error as check_output
                 stderr = ''.join(stderr.readlines()).replace(u'\u2018', u'"').replace(u'\u2019', u'"')
                 stdout = ''.join(stdout.readlines()).replace(u'\u2018', u'"').replace(u'\u2019', u'"')
-                logger.error('Command: "{0}" failed with output "{1}" and error "{2}"'.format(command, stdout, stderr))
+                if suppress_logging is False:
+                    logger.error('Command: "{0}" failed with output "{1}" and error "{2}"'.format(command, stdout, stderr))
                 raise CalledProcessError(exit_code, command, stderr)
             if debug:
                 return '\n'.join(line.rstrip() for line in stdout).strip(), stderr
@@ -227,7 +242,7 @@ class SSHClient(object):
         if isinstance(directories, basestring):
             directories = [directories]
         for directory in directories:
-            directory = self._shell_safe(directory)
+            directory = self.shell_safe(directory)
             if self.is_local is True:
                 if not os.path.exists(directory):
                     os.makedirs(directory)
@@ -243,7 +258,7 @@ class SSHClient(object):
         if isinstance(directories, basestring):
             directories = [directories]
         for directory in directories:
-            directory = self._shell_safe(directory)
+            directory = self.shell_safe(directory)
             real_path = self.file_read_link(directory)
             if real_path and follow_symlinks is True:
                 self.file_unlink(directory.rstrip('/'))
@@ -267,20 +282,27 @@ class SSHClient(object):
         :param directory: Directory to check for existence
         """
         if self.is_local is True:
-            return os.path.isdir(self._shell_safe(directory))
+            return os.path.isdir(self.shell_safe(directory))
         else:
             command = """import os, json
-print json.dumps(os.path.isdir('{0}'))""".format(self._shell_safe(directory))
+print json.dumps(os.path.isdir('{0}'))""".format(self.shell_safe(directory))
             return json.loads(self.run('python -c """{0}"""'.format(command)))
 
     def dir_chmod(self, directories, mode, recursive=False):
+        """
+        Chmod a or multiple directories
+        :param directories: Directories to chmod
+        :param mode: Mode to chmod
+        :param recursive: Chmod the directories recursively or not
+        :return: None
+        """
         if not isinstance(mode, int):
             raise ValueError('Mode should be an integer')
 
         if isinstance(directories, basestring):
             directories = [directories]
         for directory in directories:
-            directory = self._shell_safe(directory)
+            directory = self.shell_safe(directory)
             if self.is_local is True:
                 os.chmod(directory, mode)
                 if recursive is True:
@@ -292,6 +314,14 @@ print json.dumps(os.path.isdir('{0}'))""".format(self._shell_safe(directory))
                 self.run('chmod {0} {1} {2}'.format(recursive_str, oct(mode), directory))
 
     def dir_chown(self, directories, user, group, recursive=False):
+        """
+        Chown a or multiple directories
+        :param directories: Directories to chown
+        :param user: User to assign to directories
+        :param group: Group to assign to directories
+        :param recursive: Chown the directories recursively or not
+        :return: None
+        """
         all_users = [user_info[0] for user_info in pwd.getpwall()]
         all_groups = [group_info[0] for group_info in grp.getgrall()]
 
@@ -305,7 +335,7 @@ print json.dumps(os.path.isdir('{0}'))""".format(self._shell_safe(directory))
         if isinstance(directories, basestring):
             directories = [directories]
         for directory in directories:
-            directory = self._shell_safe(directory)
+            directory = self.shell_safe(directory)
             if self.is_local is True:
                 os.chown(directory, uid, gid)
                 if recursive is True:
@@ -316,22 +346,44 @@ print json.dumps(os.path.isdir('{0}'))""".format(self._shell_safe(directory))
                 recursive_str = '-R' if recursive is True else ''
                 self.run('chown {0} {1}:{2} {3}'.format(recursive_str, user, group, directory))
 
+    def dir_list(self, directory):
+        """
+        List contents of a directory on a remote host
+        :param directory: Directory to list
+        """
+        if self.is_local is True:
+            return os.listdir(self.shell_safe(directory))
+        else:
+            command = """import os, json
+print json.dumps(os.listdir('{0}'))""".format(self.shell_safe(directory))
+            return json.loads(self.run('python -c """{0}"""'.format(command)))
+
     def symlink(self, links):
+        """
+        Create symlink
+        :param links: Dictionary containing the absolute path of the files and their link which needs to be created
+        :return: None
+        """
         if self.is_local is True:
             for link_name, source in links.iteritems():
                 os.symlink(source, link_name)
         else:
             for link_name, source in links.iteritems():
-                self.run('ln -s {0} {1}'.format(self._shell_safe(source), self._shell_safe(link_name)))
+                self.run('ln -s {0} {1}'.format(self.shell_safe(source), self.shell_safe(link_name)))
 
     def file_create(self, filenames):
+        """
+        Create a or multiple files
+        :param filenames: Files to create
+        :return: None
+        """
         if isinstance(filenames, basestring):
             filenames = [filenames]
         for filename in filenames:
             if not filename.startswith('/'):
                 raise ValueError('Absolute path required for filename {0}'.format(filename))
 
-            filename = self._shell_safe(filename)
+            filename = self.shell_safe(filename)
             if self.is_local is True:
                 if not self.dir_exists(directory=os.path.dirname(filename)):
                     self.dir_create(os.path.dirname(filename))
@@ -350,7 +402,7 @@ print json.dumps(os.path.isdir('{0}'))""".format(self._shell_safe(directory))
         if isinstance(filenames, basestring):
             filenames = [filenames]
         for filename in filenames:
-            filename = self._shell_safe(filename)
+            filename = self.shell_safe(filename)
             if self.is_local is True:
                 if '*' in filename:
                     for fn in glob.glob(filename):
@@ -369,7 +421,12 @@ print json.dumps(glob.glob('{0}'))""".format(filename)
                         self.run('rm -f "{0}"'.format(filename))
 
     def file_unlink(self, path):
-        path = self._shell_safe(path)
+        """
+        Unlink a file
+        :param path: Path of the file to unlink
+        :return: None
+        """
+        path = self.shell_safe(path)
         if self.is_local is True:
             if os.path.islink(path):
                 os.unlink(path)
@@ -377,13 +434,20 @@ print json.dumps(glob.glob('{0}'))""".format(filename)
             self.run("unlink {0}".format(path))
 
     def file_read_link(self, path):
-        path = self._shell_safe(path.rstrip('/'))
+        """
+        Read the symlink of the specified path
+        :param path: Path of the symlink
+        :return: None
+        """
+        path = self.shell_safe(path.rstrip('/'))
         if self.is_local is True:
             if os.path.islink(path):
                 return os.path.realpath(path)
         else:
             try:
-                return self.run('readlink -f {0}'.format(path))
+                real_path = self.run('readlink {0}'.format(path), suppress_logging=True)
+                if real_path:
+                    return "/".join(path.split('/')[:-1] + [real_path])
             except:
                 pass
 
@@ -440,10 +504,10 @@ print json.dumps(glob.glob('{0}'))""".format(filename)
         :param filename: File to check for existence
         """
         if self.is_local is True:
-            return os.path.isfile(self._shell_safe(filename))
+            return os.path.isfile(self.shell_safe(filename))
         else:
             command = """import os, json
-print json.dumps(os.path.isfile('{0}'))""".format(self._shell_safe(filename))
+print json.dumps(os.path.isfile('{0}'))""".format(self.shell_safe(filename))
             return json.loads(self.run('python -c """{0}"""'.format(command)))
 
     def file_attribs(self, filename, mode):
@@ -458,51 +522,36 @@ print json.dumps(os.path.isfile('{0}'))""".format(self._shell_safe(filename))
         else:
             self.run(command)
 
-    @connected()
-    def config_read(self, key):
+    def file_list(self, directory, abs_path=False, recursive=False):
+        """
+        List all files in directory
+        WARNING: If executed recursively while not locally, this can take quite some time
+
+        :param directory: Directory to list the files in
+        :param abs_path: Return the absolute path of the files or only the file names
+        :param recursive: Loop through the directories recursively
+        :return: List of files in directory
+        """
+        all_files = []
+        directory = self.shell_safe(directory)
         if self.is_local is True:
-            from ovs.extensions.generic.configuration import Configuration
-            return Configuration.get(key)
+            for root, dirs, files in os.walk(directory):
+                for file_name in files:
+                    if abs_path is True:
+                        all_files.append(os.path.join(root, file_name))
+                    else:
+                        all_files.append(file_name)
+                if recursive is False:
+                    break
         else:
-            read = """
-import sys, json
-sys.path.append('/opt/OpenvStorage')
-from ovs.extensions.generic.configuration import Configuration
-print json.dumps(Configuration.get('{0}'))
-""".format(key)
-            return json.loads(self.run('python -c """{0}"""'.format(read)))
+            with Remote(self.ip, [os], 'root') as remote:
+                for root, dirs, files in remote.os.walk(directory):
+                    for file_name in files:
+                        if abs_path is True:
+                            all_files.append(os.path.join(root, file_name))
+                        else:
+                            all_files.append(file_name)
+                    if recursive is False:
+                        break
+        return all_files
 
-    @connected()
-    def config_set(self, key, value):
-        if self.is_local is True:
-            from ovs.extensions.generic.configuration import Configuration
-            Configuration.set(key, value)
-        else:
-            write = """
-import sys, json
-sys.path.append('/opt/OpenvStorage')
-from ovs.extensions.generic.configuration import Configuration
-Configuration.set('{0}', json.loads('{1}'))
-""".format(key, json.dumps(value).replace('"', '\\"'))
-            self.run('python -c """{0}"""'.format(write))
-
-    def rawconfig_read(self, filename):
-        contents = self.file_read(filename)
-        handle, temp_filename = tempfile.mkstemp()
-        with open(temp_filename, 'w') as configfile:
-            configfile.write(contents)
-        os.close(handle)
-        rawconfig = RawConfigParser()
-        rawconfig.read(temp_filename)
-        os.remove(temp_filename)
-        return rawconfig
-
-    def rawconfig_write(self, filename, rawconfig):
-        handle, temp_filename = tempfile.mkstemp()
-        with open(temp_filename, 'w') as configfile:
-            rawconfig.write(configfile)
-        with open(temp_filename, 'r') as configfile:
-            contents = configfile.read()
-            self.file_write(filename, contents)
-        os.close(handle)
-        os.remove(temp_filename)

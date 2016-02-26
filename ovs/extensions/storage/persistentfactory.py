@@ -15,7 +15,7 @@
 """
 Generic persistent factory.
 """
-from ovs.extensions.generic.configuration import Configuration
+from ovs.extensions.db.etcd.configuration import EtcdConfiguration
 from ovs.log.logHandler import LogHandler
 
 logger = LogHandler.get('extensions', name='persistent factory')
@@ -34,9 +34,12 @@ class PersistentFactory(object):
 
         if not hasattr(PersistentFactory, 'store') or PersistentFactory.store is None:
             if client_type is None:
-                client_type = Configuration.get('ovs.core.storage.persistent')
+                client_type = EtcdConfiguration.get('/ovs/framework/stores|persistent')
 
             PersistentFactory.store = None
+            if client_type == 'pyrakoon':
+                from ovs.extensions.storage.persistent.pyrakoonstore import PyrakoonStore
+                PersistentFactory.store = PyrakoonStore('ovsdb')
             if client_type == 'arakoon':
                 from ovs.extensions.storage.persistent.arakoonstore import ArakoonStore
                 PersistentFactory.store = ArakoonStore('ovsdb')

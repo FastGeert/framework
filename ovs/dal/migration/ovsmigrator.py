@@ -374,8 +374,8 @@ class OVSMigrator(object):
                     storagedriver.save()
                 if migrated_objects:
                     print 'Loading sizes'
-                    config = StorageDriverConfiguration('storagedriver', storagedriver.vpool.name)
-                    config.load(SSHClient(storagedriver.storagerouter, username='ovs'))
+                    config = StorageDriverConfiguration('storagedriver', storagedriver.vpool_guid, storagedriver.storagedriver_id)
+                    config.load()
                     for readcache in config.configuration.get('content_addressed_cache', {}).get('clustercache_mount_points', []):
                         path = readcache.get('path', '').rsplit('/', 1)[0]
                         size = int(readcache['size'].strip('KiB')) * 1024 if 'size' in readcache else None
@@ -436,15 +436,12 @@ class OVSMigrator(object):
 
             working_version = 5
 
-        # Version 6
-        # Distributed scrubbing
+        # Version 6 introduced:
+        # - Distributed scrubbing
         if working_version < 6:
             from ovs.dal.hybrids.diskpartition import DiskPartition
-            from ovs.dal.lists.servicetypelist import ServiceTypeList
             from ovs.dal.lists.storagedriverlist import StorageDriverList
-            from ovs.dal.lists.storagerouterlist import StorageRouterList
             from ovs.extensions.generic.sshclient import SSHClient
-            from ovs.extensions.storageserver.storagedriver import StorageDriverConfiguration
             for storage_driver in StorageDriverList.get_storagedrivers():
                 root_client = SSHClient(storage_driver.storagerouter, username='root')
                 for partition in storage_driver.partitions:
@@ -463,5 +460,18 @@ class OVSMigrator(object):
                         root_client.dir_chmod(partition.path, 0777)
 
             working_version = 6
+
+        # Version 7 introduced:
+        # - vPool status
+        if working_version < 7:
+            from ovs.dal.hybrids import vpool
+            reload(vpool)
+            from ovs.dal.hybrids.vpool import VPool
+            from ovs.dal.lists.vpoollist import VPoolList
+            for _vpool in VPoolList.get_vpools():
+                vpool = VPool(_vpool.guid)
+                if hasattr(vpool, 'status') and vpool.status is None:
+                    vpool.status = VPool.STATUSES.RUNNING
+                    vpool.save()
 
         return working_version

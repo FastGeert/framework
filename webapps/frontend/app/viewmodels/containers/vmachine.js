@@ -59,7 +59,8 @@ define([
         self.backendWritten        = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatBytes });
         self.backendRead           = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatBytes });
         self.bandwidthSaved        = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatBytes });
-        self.dtlMode               = ko.observable();
+        self.totalCacheHits        = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatNumber });
+        self.dtlStatus             = ko.observable();
         self.snapshots             = ko.observableArray([]);
         self.vDisks                = ko.observableArray([]);
         self.templateChildrenGuids = ko.observableArray([]);
@@ -117,7 +118,7 @@ define([
                 self.snapshots(snapshots);
             }
             generic.trySet(self.status, data, 'status', generic.lower);
-            generic.trySet(self.dtlMode, data, 'dtl_mode', generic.lower);
+            generic.trySet(self.dtlStatus, data, 'dtl_mode', generic.lower);
             generic.trySet(self.pMachineGuid, data, 'pmachine_guid');
             if (data.hasOwnProperty('storagerouters_guids')) {
                 self.storageRouterGuids = data.storagerouters_guids;
@@ -140,6 +141,7 @@ define([
                 self.iops(stats['4k_operations_ps']);
                 self.cacheHits(stats.cache_hits_ps);
                 self.cacheMisses(stats.cache_misses_ps);
+                self.totalCacheHits(stats.cache_hits);
                 self.readSpeed(stats.data_read_ps);
                 self.writeSpeed(stats.data_written_ps);
                 self.backendWritten(stats.backend_data_written);

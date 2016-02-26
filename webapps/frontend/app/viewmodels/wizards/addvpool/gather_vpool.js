@@ -15,21 +15,21 @@
 define([
     'jquery', 'knockout',
     'ovs/shared', 'ovs/api', 'ovs/generic',
-    '../../containers/storagerouter', '../../containers/storagedriver', '../../containers/vpool', './data'
-], function($, ko, shared, api, generic, StorageRouter, StorageDriver, VPool, data) {
+    '../../containers/albabackend', '../../containers/storagerouter', '../../containers/storagedriver', '../../containers/vpool', './data'
+], function($, ko, shared, api, generic, AlbaBackend, StorageRouter, StorageDriver, VPool, data) {
     "use strict";
     return function() {
         var self = this;
 
         // Variables
-        self.shared                   = shared;
-        self.data                     = data;
+        self.data   = data;
+        self.shared = shared;
 
         //Handles
         self.checkS3Handle            = undefined;
         self.checkMtptHandle          = undefined;
         self.fetchAlbaVPoolHandle     = undefined;
-        self.loadStorageRouterHandle  = undefined;
+        self.loadStorageDriversHandle = undefined;
         self.loadStorageRoutersHandle = undefined;
         self.loadStorageDriversHandle = {};
 
@@ -41,51 +41,53 @@ define([
         // Computed
         self.canContinue = ko.computed(function() {
             var valid = true, showErrors = false, reasons = [], fields = [], preValidation = self.preValidateResult();
-            if (!self.data.name.valid()) {
-                valid = false;
-                fields.push('name');
-                reasons.push($.t('ovs:wizards.addvpool.gathervpool.invalidname'));
-            }
-            else {
-                $.each(self.data.vPools(), function(index, vpool) {
-                    if (vpool.name() === self.data.name()) {
+            if (self.data.vPool() === undefined) {
+                if (!self.data.name.valid()) {
+                    valid = false;
+                    fields.push('name');
+                    reasons.push($.t('ovs:wizards.add_vpool.gather_vpool.invalid_name'));
+                }
+                else {
+                    $.each(self.data.vPools(), function (index, vpool) {
+                        if (vpool.name() === self.data.name()) {
+                            valid = false;
+                            fields.push('name');
+                            reasons.push($.t('ovs:wizards.add_vpool.gather_vpool.duplicate_name'));
+                        }
+                    });
+                }
+                if (self.data.backend().match(/^.+_s3$/)) {
+                    if (!self.data.host.valid()) {
                         valid = false;
-                        fields.push('name');
-                        reasons.push($.t('ovs:wizards.addvpool.gathervpool.duplicatename'));
+                        fields.push('host');
+                        reasons.push($.t('ovs:wizards.add_vpool.gather_vpool.invalid_host'));
                     }
-                });
-            }
-            if (self.data.backend().match(/^.+_s3$/)) {
-                if (!self.data.host.valid()) {
-                    valid = false;
-                    fields.push('host');
-                    reasons.push($.t('ovs:wizards.addvpool.gathervpool.invalidhost'));
+                    if (self.data.accesskey() === '' || self.data.secretkey() === '') {
+                        valid = false;
+                        fields.push('accesskey');
+                        fields.push('secretkey');
+                        reasons.push($.t('ovs:wizards.add_vpool.gather_vpool.no_credentials'));
+                    }
                 }
-                if (self.data.accesskey() === '' || self.data.secretkey() === '') {
-                    valid = false;
-                    fields.push('accesskey');
-                    fields.push('secretkey');
-                    reasons.push($.t('ovs:wizards.addvpool.gathervpool.nocredentials'));
+                if (preValidation.valid === false) {
+                    showErrors = true;
+                    reasons = reasons.concat(preValidation.reasons);
+                    fields = fields.concat(preValidation.fields);
                 }
             }
-            if (self.data.backend() === 'alba') {
+            if (self.data.backend() === 'alba' && self.data.editBackend()) {
                 if (self.data.albaBackend() === undefined) {
                     valid = false;
-                    reasons.push($.t('ovs:wizards.addvpool.gathervpool.choosebackend'));
+                    reasons.push($.t('ovs:wizards.add_vpool.gather_vpool.choose_backend'));
                     fields.push('backend');
                 }
-                if (self.invalidAlbaInfo()) {
+                if (self.invalidAlbaInfo() && !self.data.localHost()) {
                     valid = false;
-                    reasons.push($.t('ovs:wizards.addvpool.gathervpool.invalidalbainfo'));
+                    reasons.push($.t('ovs:wizards.add_vpool.gather_vpool.invalid_alba_info'));
                     fields.push('clientid');
                     fields.push('clientsecret');
                     fields.push('host');
                 }
-            }
-            if (preValidation.valid === false) {
-                showErrors = true;
-                reasons = reasons.concat(preValidation.reasons);
-                fields = fields.concat(preValidation.fields);
             }
             return { value: valid, showErrors: showErrors, reasons: reasons, fields: fields };
         });
@@ -109,7 +111,7 @@ define([
                                 .done(function(data) {
                                     if (!data) {
                                         validationResult.valid = false;
-                                        validationResult.reasons.push($.t('ovs:wizards.addvpool.gathervpool.invalids3info'));
+                                        validationResult.reasons.push($.t('ovs:wizards.add_vpool.gather_vpool.invalid_s3_info'));
                                         validationResult.fields.push('accesskey');
                                         validationResult.fields.push('secretkey');
                                         validationResult.fields.push('host');
@@ -131,61 +133,12 @@ define([
                             .done(function(data) {
                                 if (!data) {
                                     validationResult.valid = false;
-                                    validationResult.reasons.push($.t('ovs:wizards.addvpool.gathervpool.mtptinuse', { what: self.data.name() }));
+                                    validationResult.reasons.push($.t('ovs:wizards.add_vpool.gather_vpool.mtpt_in_use', { what: self.data.name() }));
                                     validationResult.fields.push('name');
                                 }
                                 mtptDeferred.resolve();
                             })
                             .fail(mtptDeferred.reject);
-                    }).promise(),
-                    $.Deferred(function(physicalMetadataDeferred) {
-                        generic.xhrAbort(self.loadStorageRouterHandle);
-                        self.loadStorageRouterHandle = api.post('storagerouters/' + self.data.target().guid() + '/get_metadata')
-                            .then(self.shared.tasks.wait)
-                            .then(function(data) {
-                                var write;
-                                self.data.mountpoints(data.mountpoints);
-                                self.data.partitions(data.partitions);
-                                self.data.ipAddresses(data.ipaddresses);
-                                self.data.arakoonFound(data.arakoon_found);
-                                self.data.sharedSize(data.shared_size);
-                                self.data.scrubAvailable(data.scrub_available);
-                                self.data.readCacheAvailableSize(data.readcache_size);
-                                self.data.writeCacheAvailableSize(data.writecache_size);
-                                self.data.readCacheSize(Math.floor(data.readcache_size / 1024 / 1024 / 1024));
-                                if (self.data.readCacheAvailableSize() === 0) {
-                                    write = Math.floor((data.writecache_size + data.shared_size) / 1024 / 1024 / 1024) - 1;
-                                } else {
-                                    write = Math.floor((data.writecache_size + data.shared_size) / 1024 / 1024 / 1024);
-                                }
-                                self.data.writeCacheSize(write);
-                            })
-                            .done(function() {
-                                var requiredRoles = ['READ', 'WRITE'];
-                                if (self.data.arakoonFound() === false) {
-                                    requiredRoles.push('DB');
-                                }
-                                $.each(self.data.partitions(), function(role, partitions) {
-                                   if (requiredRoles.contains(role) && partitions.length > 0) {
-                                       generic.removeElement(requiredRoles, role);
-                                   }
-                                });
-                                if (requiredRoles.contains('DB')) {
-                                    validationResult.valid = false;
-                                    validationResult.reasons.push($.t('ovs:wizards.addvpool.gathervpool.missing_arakoon'));
-                                    generic.removeElement(requiredRoles, 'DB');
-                                }
-                                $.each(requiredRoles, function(index, role) {
-                                    validationResult.valid = false;
-                                    validationResult.reasons.push($.t('ovs:wizards.addvpool.gathervpool.missing_role', { what: role }));
-                                });
-                                if (self.data.backend() === 'distributed' && self.data.mountpoints().length === 0) {
-                                    validationResult.valid = false;
-                                    validationResult.reasons.push($.t('ovs:wizards.addvpool.gathervpool.missing_mountpoints'));
-                                }
-                                physicalMetadataDeferred.resolve();
-                            })
-                            .fail(physicalMetadataDeferred.reject);
                     }).promise()
                 ])
                     .always(function() {
@@ -199,37 +152,41 @@ define([
             }).promise();
         };
         self.next = function() {
-            return $.Deferred(function(deferred) {
-                var calls = [];
-                generic.crossFiller(
-                    self.data.target().storageDriverGuids, self.data.storageDrivers,
-                    function(guid) {
-                        var storageDriver = new StorageDriver(guid);
-                        calls.push($.Deferred(function(deferred) {
-                            generic.xhrAbort(self.loadStorageDriversHandle[guid]);
-                            self.loadStorageDriversHandle[guid] = api.get('storagedrivers/' + guid)
-                                .done(function(storageDriverData) {
-                                    storageDriver.fillData(storageDriverData);
-                                    deferred.resolve();
-                                })
-                                .fail(deferred.reject);
-                        }).promise());
-                        return storageDriver;
-                    }, 'guid'
-                );
-                $.when.apply($, calls)
-                    .done(deferred.resolve)
-                    .fail(deferred.reject);
+            $.each(self.data.storageRouters(), function(index, storageRouter) {
+                if (storageRouter === self.data.target()) {
+                    $.each(self.data.dtlTransportModes(), function (i, key) {
+                        if (key.name === 'rdma') {
+                            self.data.dtlTransportModes()[i].disabled = storageRouter.rdmaCapable() === undefined ? true : !storageRouter.rdmaCapable();
+                            return false;
+                        }
+                    });
+                }
             });
+            if (self.data.vPool() !== undefined) {
+                return $.Deferred(function(deferred) {
+                    var calls = [];
+                    generic.crossFiller(
+                        self.data.vPool().storageDriverGuids(), self.data.storageDrivers,
+                        function(guid) {
+                            var storageDriver = new StorageDriver(guid);
+                            calls.push(storageDriver.load());
+                            return storageDriver;
+                        }, 'guid'
+                    );
+                    $.when.apply($, calls)
+                        .done(deferred.resolve)
+                        .fail(deferred.reject);
+                });
+            }
         };
         self.loadAlbaBackends = function() {
             return $.Deferred(function(albaDeferred) {
                 generic.xhrAbort(self.fetchAlbaVPoolHandle);
-                var getData, relay = '', remoteInfo = {};
-                getData = {
-                    backend_type: 'alba',
-                    contents: '_dynamics'
-                };
+                var relay = '', remoteInfo = {},
+                    getData = {
+                        backend_type: 'alba',
+                        contents: '_dynamics'
+                    };
                 if (!self.data.localHost()) {
                     relay = 'relay/';
                     remoteInfo.ip = self.data.host();
@@ -261,11 +218,24 @@ define([
                         $.when.apply($, calls)
                             .then(function() {
                                 if (available_backends.length > 0) {
-                                    self.data.albaBackends(available_backends);
-                                    self.data.albaBackend(available_backends[0]);
-                                    self.data.albaPreset(available_backends[0].presetNames()[0]);
+                                    var guids = [], abData = {};
+                                    $.each(available_backends, function(index, item) {
+                                        guids.push(item.guid);
+                                        abData[item.guid] = item;
+                                    });
+                                    generic.crossFiller(
+                                        guids, self.data.albaBackends,
+                                        function(guid) {
+                                            return new AlbaBackend(guid);
+                                        }, 'guid'
+                                    );
+                                    $.each(self.data.albaBackends(), function(index, albaBackend) {
+                                        albaBackend.fillData(abData[albaBackend.guid()]);
+                                    });
+                                    self.data.albaBackend(self.data.albaBackends()[0]);
+                                    self.data.albaPreset(self.data.albaBackends()[0].enhancedPresets()[0]);
                                 } else {
-                                    self.data.albaBackends(undefined);
+                                    self.data.albaBackends([]);
                                     self.data.albaBackend(undefined);
                                     self.data.albaPreset(undefined);
                                 }
@@ -273,7 +243,7 @@ define([
                             })
                             .done(albaDeferred.resolve)
                             .fail(function() {
-                                self.data.albaBackends(undefined);
+                                self.data.albaBackends([]);
                                 self.data.albaBackend(undefined);
                                 self.data.albaPreset(undefined);
                                 self.albaBackendLoading(false);
@@ -282,7 +252,7 @@ define([
                             });
                     })
                     .fail(function() {
-                        self.data.albaBackends(undefined);
+                        self.data.albaBackends([]);
                         self.data.albaBackend(undefined);
                         self.albaBackendLoading(false);
                         self.invalidAlbaInfo(true);
@@ -295,7 +265,7 @@ define([
         self.activate = function() {
             generic.xhrAbort(self.loadStorageRoutersHandle);
             self.loadStorageRoutersHandle = api.get('storagerouters', {
-                    queryparams: {
+                queryparams: {
                     contents: 'storagedrivers',
                     sort: 'name'
                 }
@@ -309,7 +279,9 @@ define([
                     generic.crossFiller(
                         guids, self.data.storageRouters,
                         function(guid) {
-                            return new StorageRouter(guid);
+                            if (self.data.vPool() === undefined || !self.data.vPool().storageRouterGuids().contains(guid)) {
+                                return new StorageRouter(guid);
+                            }
                         }, 'guid'
                     );
                     $.each(self.data.storageRouters(), function(index, storageRouter) {
@@ -319,12 +291,12 @@ define([
                         self.data.target(self.data.storageRouters()[0]);
                     }
                 });
-
             if (generic.xhrCompleted(self.loadVPoolsHandle)) {
-                var options = {
-                    contents: ''
-                };
-                self.loadVPoolsHandle = api.get('vpools', { queryparams: options })
+                self.loadVPoolsHandle = api.get('vpools', {
+                    queryparams: {
+                        contents: ''
+                    }
+                })
                     .done(function (data) {
                         var guids = [], vpData = {};
                         $.each(data.data, function (index, item) {
@@ -343,6 +315,53 @@ define([
                             }
                         });
                     });
+            }
+            if (self.data.vPool() !== undefined) {
+                var currentConfig = self.data.vPool().configuration();
+                self.data.name(self.data.vPool().name());
+                self.data.backend(self.data.vPool().backendType().code());
+                self.data.scoSize(currentConfig.sco_size);
+                self.data.dedupeMode(currentConfig.dedupe_mode);
+                self.data.dtlEnabled(currentConfig.dtl_enabled);
+                self.data.dtlMode({name: currentConfig.dtl_mode});
+                self.data.writeBuffer(currentConfig.write_buffer);
+                self.data.cacheStrategy(currentConfig.cache_strategy);
+                self.data.dtlTransportMode({name: currentConfig.dtl_transport});
+                var metadata = self.data.vPool().metadata();
+                if (self.data.vPool().backendType().code() === 'alba') {
+                    if (metadata.hasOwnProperty('connection')) {
+                        // Created in or after 2.7.0
+                        self.data.v260Migration(false);
+                        self.data.localHost(metadata.connection.local);
+                        if (metadata.connection.local) {
+                            self.data.accesskey('');
+                            self.data.secretkey('');
+                            self.data.host('');
+                            self.data.port('');
+                        } else {
+                            self.data.accesskey(metadata.connection.client_id);
+                            self.data.secretkey(metadata.connection.client_secret);
+                            self.data.host(metadata.connection.host);
+                            self.data.port(metadata.connection.port);
+                        }
+                        self.loadAlbaBackends()
+                            .done(function () {
+                                $.each(self.data.albaBackends(), function (_, albaBackend) {
+                                    if (albaBackend.guid() === metadata.backend_guid) {
+                                        self.data.albaBackend(albaBackend);
+                                        $.each(albaBackend.enhancedPresets(), function (_, preset) {
+                                            if (preset.name === self.data.vPool().backendPreset()) {
+                                                self.data.albaPreset(preset);
+                                            }
+                                        });
+                                    }
+                                });
+                            });
+                    } else {
+                        // Created before 2.7.0
+                        self.data.v260Migration(true);
+                    }
+                }
             }
         };
     };

@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 /*global define */
-define([
-    'knockout', 'jquery'
-], function(ko, $){
+define(['knockout'], function(ko){
     "use strict";
     var nameRegex, hostRegex, ipRegex, singleton;
     nameRegex = /^[0-9a-z][\-a-z0-9]{1,48}[a-z0-9]$/;
@@ -25,9 +23,8 @@ define([
         var wizardData = {
             accesskey:               ko.observable(''),
             albaBackend:             ko.observable(),
-            albaBackends:            ko.observableArray(),
+            albaBackends:            ko.observableArray([]),
             albaPreset:              ko.observable(),
-            arakoonFound:            ko.observable(false),
             backend:                 ko.observable('alba'),
             backends:                ko.observableArray(['alba', 'ceph_s3', 'amazon_s3', 'swift_s3', 'distributed']),
             cacheStrategies:         ko.observableArray(['on_read', 'on_write', 'none']),
@@ -36,12 +33,10 @@ define([
             dedupeModes:             ko.observableArray(['dedupe', 'non_dedupe']),
             distributedMtpt:         ko.observable(),
             dtlEnabled:              ko.observable(true),
-            dtlLocation:             ko.observable(''),
-            dtlMode:                 ko.observable(''),
-            dtlModes:                ko.observableArray(['no_sync', 'a_sync', 'sync']),
+            dtlMode:                 ko.observable(),
+            dtlModes:                ko.observableArray([{name: 'no_sync', disabled: false}, {name: 'a_sync', disabled: false}, {name: 'sync', disabled: false}]),
             dtlTransportMode:        ko.observable({name: 'tcp'}),
             dtlTransportModes:       ko.observableArray([{name: 'tcp', disabled: false}, {name: 'rdma', disabled: true}]),
-            extendVpool:             ko.observable(false),
             hasMgmtCenter:           ko.observable(false),
             host:                    ko.observable('').extend({ regex: hostRegex }),
             integratemgmt:           ko.observable(),
@@ -67,16 +62,16 @@ define([
             storageDriver:           ko.observable(),
             storageDrivers:          ko.observableArray([]),
             storageIP:               ko.observable().extend({ regex: ipRegex, identifier: 'storageip' }),
-            storageRouter:           ko.observable(),
             storageRouters:          ko.observableArray([]),
             target:                  ko.observable(),
             vPool:                   ko.observable(),
             vPools:                  ko.observableArray([]),
             writeBuffer:             ko.observable(128).extend({numeric: {min: 128, max: 10240}}),
             writeCacheSize:          ko.observable(1).extend({numeric: {min: 1, max: 10240}}),
-            writeCacheAvailableSize: ko.observable()
+            writeCacheAvailableSize: ko.observable(),
+            v260Migration:           ko.observable(false)
         }, resetAlbaBackends = function() {
-            wizardData.albaBackends(undefined);
+            wizardData.albaBackends([]);
             wizardData.albaBackend(undefined);
             wizardData.albaPreset(undefined);
         };
@@ -99,6 +94,14 @@ define([
                 wizardData.writeBuffer.min = 256;
             }
             wizardData.writeBuffer(wizardData.writeBuffer());
+        });
+
+        // Computed
+        wizardData.vPoolAdd = ko.computed(function() {
+            return wizardData.vPool() === undefined;
+        });
+        wizardData.editBackend = ko.computed(function() {
+            return wizardData.vPoolAdd() || wizardData.v260Migration();
         });
 
         return wizardData;

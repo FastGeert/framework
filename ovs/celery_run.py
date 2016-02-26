@@ -21,26 +21,18 @@ import sys
 sys.path.append('/opt/OpenvStorage')
 
 import os
-from ConfigParser import RawConfigParser
 from kombu import Queue
 from celery import Celery
 from celery.signals import task_postrun, worker_process_init
 from ovs.lib.messaging import MessageController
 from ovs.log.logHandler import LogHandler
-from ovs.extensions.storage.volatilefactory import VolatileFactory
 from ovs.extensions.storage.persistentfactory import PersistentFactory
+from ovs.extensions.storage.volatilefactory import VolatileFactory
 from ovs.extensions.generic.system import System
-from ovs.extensions.generic.configuration import Configuration
+from ovs.extensions.db.etcd.configuration import EtcdConfiguration
 
-memcache_ini = RawConfigParser()
-memcache_ini.read(os.path.join(Configuration.get('ovs.core.cfgdir'), 'memcacheclient.cfg'))
-memcache_nodes = [node.strip() for node in memcache_ini.get('main', 'nodes').split(',')]
-memcache_servers = map(lambda n: memcache_ini.get(n, 'location'), memcache_nodes)
-
-rmq_ini = RawConfigParser()
-rmq_ini.read(os.path.join(Configuration.get('ovs.core.cfgdir'), 'rabbitmqclient.cfg'))
-rmq_nodes = [node.strip() for node in rmq_ini.get('main', 'nodes').split(',')]
-rmq_servers = map(lambda n: rmq_ini.get(n, 'location'), rmq_nodes)
+memcache_servers = EtcdConfiguration.get('/ovs/framework/memcache|endpoints')
+rmq_servers = EtcdConfiguration.get('/ovs/framework/messagequeue|endpoints')
 
 unique_id = System.get_my_machine_id()
 
@@ -53,13 +45,16 @@ for filename in os.listdir(path):
 
 celery = Celery('ovs', include=include)
 
-celery.conf.CELERY_RESULT_BACKEND = "cache"
-celery.conf.CELERY_CACHE_BACKEND = 'memcached://{0}/'.format(';'.join(memcache_servers))
-celery.conf.BROKER_URL = ';'.join(['{0}://{1}:{2}@{3}//'.format(Configuration.get('ovs.core.broker.protocol'),
-                                                                Configuration.get('ovs.core.broker.login'),
-                                                                Configuration.get('ovs.core.broker.password'),
+# http://docs.celeryproject.org/en/latest/configuration.html#cache-backend-settings
+celery.conf.CELERY_RESULT_BACKEND = "cache+memcached://{0}/".format(';'.join(memcache_servers))
+celery.conf.BROKER_URL = ';'.join(['{0}://{1}:{2}@{3}//'.format(EtcdConfiguration.get('/ovs/framework/messagequeue|protocol'),
+                                                                EtcdConfiguration.get('/ovs/framework/messagequeue|user'),
+                                                                EtcdConfiguration.get('/ovs/framework/messagequeue|password'),
                                                                 server)
                                    for server in rmq_servers])
+celery.conf.BROKER_CONNECTION_MAX_RETRIES = 5
+celery.conf.BROKER_HEARTBEAT = 10
+celery.conf.BROKER_HEARTBEAT_CHECKRATE = 2
 celery.conf.CELERY_DEFAULT_QUEUE = 'ovs_generic'
 celery.conf.CELERY_QUEUES = tuple([Queue('ovs_generic', routing_key='generic.#'),
                                    Queue('ovs_masters', routing_key='masters.#'),
@@ -80,7 +75,10 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
     Hook for celery postrun event
     """
     _ = sender, task, args, kwargs, kwds
-    MessageController.fire(MessageController.Type.TASK_COMPLETE, task_id)
+    try:
+        MessageController.fire(MessageController.Type.TASK_COMPLETE, task_id)
+    except Exception as ex:
+        loghandler.error('Caught error during postrun handler: {0}'.format(ex))
 
 
 @worker_process_init.connect
@@ -94,4 +92,10 @@ def worker_process_init_handler(args=None, kwargs=None, **kwds):
 
 
 if __name__ == '__main__':
-    celery.start()
+    import sys
+    if len(sys.argv) == 2 and sys.argv[1] == 'clear_cache':
+        from ovs.lib.helpers.decorators import ENSURE_SINGLE_KEY
+
+        cache = PersistentFactory.get_client()
+        for key in cache.prefix(ENSURE_SINGLE_KEY):
+            cache.delete(key)

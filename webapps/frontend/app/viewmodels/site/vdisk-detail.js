@@ -13,26 +13,28 @@
 // limitations under the License.
 /*global define */
 define([
-    'jquery', 'plugins/dialog', 'knockout',
+    'jquery', 'durandal/app', 'plugins/dialog', 'knockout',
     'ovs/shared', 'ovs/generic', 'ovs/refresher', 'ovs/api',
     '../containers/vdisk', '../containers/vmachine', '../containers/vpool', '../containers/storagerouter',
     '../wizards/rollback/index', '../wizards/clone/index'
-], function($, dialog, ko, shared, generic, Refresher, api, VDisk, VMachine, VPool, StorageRouter, RollbackWizard, CloneWizard) {
+], function($, app, dialog, ko, shared, generic, Refresher, api, VDisk, VMachine, VPool, StorageRouter, RollbackWizard, CloneWizard) {
     "use strict";
     return function() {
         var self = this;
 
         // Variables
-        self.shared            = shared;
-        self.guard             = { authenticated: true, registered: true };
-        self.refresher         = new Refresher();
-        self.widgets           = [];
-        self.snapshotHeaders   = [
+        self.shared          = shared;
+        self.guard           = { authenticated: true, registered: true };
+        self.refresher       = new Refresher();
+        self.widgets         = [];
+        self.snapshotHeaders = [
             { key: 'label',         value: $.t('ovs:generic.description'), width: undefined },
             { key: 'timestamp',     value: $.t('ovs:generic.datetime'),    width: 200       },
             { key: 'stored',        value: $.t('ovs:generic.storeddata'),  width: 110       },
             { key: 'is_automatic',  value: $.t('ovs:generic.type'),        width: 110       },
-            { key: 'is_consistent', value: $.t('ovs:generic.consistent'),  width: 100       }
+            { key: 'is_consistent', value: $.t('ovs:generic.consistent'),  width: 100       },
+            { key: 'is_sticky',     value: $.t('ovs:generic.sticky'),      width: 100       },
+            { key: undefined,       value: $.t('ovs:generic.actions'),     width: 60        }
         ];
 
         // Observables
@@ -40,6 +42,9 @@ define([
         self.tables               = ko.observableArray([]);
         self.tabs                 = ko.observableArray([]);
         self.vDisk                = ko.observable();
+
+        // Handles
+        self.loadStorageRoutersHandle = undefined;
 
         // Functions
         self.load = function() {
@@ -99,9 +104,16 @@ define([
         };
         self.saveConfiguration = function() {
             if (self.vDisk() !== undefined) {
-                var vd = self.vDisk();
+                var vd = self.vDisk(), newConfig = {};
+                $.each(vd.configuration(), function(key, value) {
+                    if (key === 'dtl_target' && value !== null && value !== undefined) {
+                        newConfig[key] = value.guid();
+                    } else {
+                        newConfig[key] = value;
+                    }
+                });
                 api.post('vdisks/' + vd.guid() + '/set_config_params', {
-                    data: { new_config_params: vd.configuration() }
+                    data: { new_config_params: newConfig }
                 })
                     .then(self.shared.tasks.wait)
                     .done(function () {
@@ -123,6 +135,37 @@ define([
                     });
                 vd.oldConfiguration($.extend({}, vd.configuration()));
             }
+        };
+        self.removeSnapshot = function(snapshotid) {
+            app.showMessage(
+                $.t('ovs:vdisks.removesnapshot.delete', { what: snapshotid }),
+                $.t('ovs:generic.areyousure'),
+                [$.t('ovs:generic.no'), $.t('ovs:generic.yes')]
+            )
+            .done(function(answer) {
+                if (answer === $.t('ovs:generic.yes')) {
+                    api.post('vdisks/' + self.vDisk().guid() + '/removesnapshot', {
+                        data: { snapshot_id: snapshotid }
+                    })
+                        .then(self.shared.tasks.wait)
+                        .done(function () {
+                            generic.alertSuccess(
+                                $.t('ovs:vdisks.removesnapshot.done'),
+                                $.t('ovs:vdisks.removesnapshot.donemsg', { what: snapshotid })
+                            );
+                        })
+                        .fail(function (error) {
+                            generic.alertError(
+                                $.t('ovs:generic.error'),
+                                $.t('ovs:generic.messages.errorwhile', {
+                                    what: $.t('ovs:vdisks.removesnapshot.errormsg', { what: snapshotid })
+                                })
+                            );
+                        })
+                        .always(function () {
+                            self.load();
+                        });
+            }});
         };
 
         // Durandal

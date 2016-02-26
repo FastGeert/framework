@@ -19,7 +19,6 @@ Contains the loghandler module
 import inspect
 import logging
 import os
-from ovs.extensions.generic.configuration import Configuration
 
 
 def _ignore_formatting_errors():
@@ -59,6 +58,7 @@ class LogHandler(object):
     """
 
     cache = {}
+    propagate_cache = {}
     targets = {'lib': 'lib',
                'api': 'api',
                'extensions': 'extensions',
@@ -69,7 +69,7 @@ class LogHandler(object):
                'log': 'audit_trails',
                'storagerouterclient': 'storagerouterclient'}
 
-    def __init__(self, source, name=None):
+    def __init__(self, source, name=None, propagate=True):
         """
         Initializes the logger
         """
@@ -78,7 +78,7 @@ class LogHandler(object):
             raise RuntimeError('Cannot invoke instance from outside this class. Please use LogHandler.get(source, name=None) instead')
 
         if name is None:
-            name = Configuration.get('ovs.logging.default_name')
+            name = 'logger'
 
         log_filename = LogHandler.load_path(source)
 
@@ -87,15 +87,15 @@ class LogHandler(object):
         handler.setFormatter(formatter)
 
         self.logger = logging.getLogger(name)
-        self.logger.propagate = True
-        self.logger.setLevel(getattr(logging, Configuration.get('ovs.logging.level')))
+        self.logger.propagate = propagate
+        self.logger.setLevel(getattr(logging, 'DEBUG'))
         self.logger.addHandler(handler)
+        self._key = '{0}_{1}'.format(source, name)
 
     @staticmethod
     def load_path(source):
-        log_filename = '{0}/{1}.log'.format(
-            Configuration.get('ovs.logging.path'),
-            LogHandler.targets[source] if source in LogHandler.targets else Configuration.get('ovs.logging.default_file')
+        log_filename = '/var/log/ovs/{0}.log'.format(
+            LogHandler.targets[source] if source in LogHandler.targets else 'generic'
         )
         if not os.path.exists(log_filename):
             open(log_filename, 'a').close()
@@ -103,16 +103,28 @@ class LogHandler(object):
         return log_filename
 
     @staticmethod
-    def get(source, name=None):
+    def get(source, name=None, propagate=True):
         key = '{0}_{1}'.format(source, name)
         if key not in LogHandler.cache:
-            logger = LogHandler(source, name)
+            logger = LogHandler(source, name, propagate)
             LogHandler.cache[key] = logger
+        if key not in LogHandler.propagate_cache:
+            LogHandler.propagate_cache[key] = propagate
         return LogHandler.cache[key]
+
+    def _fix_propagate(self):
+        """
+        Obey propagate flag as initially called
+        - celery will overwrite it to catch the logging
+        """
+        propagate = LogHandler.propagate_cache.get(self._key, None)
+        if propagate is not None:
+            self.logger.propagate = propagate
 
     @_ignore_formatting_errors()
     def info(self, msg, *args, **kwargs):
         """ Info """
+        self._fix_propagate()
         if 'print_msg' in kwargs:
             del kwargs['print_msg']
             print msg
@@ -121,6 +133,7 @@ class LogHandler(object):
     @_ignore_formatting_errors()
     def error(self, msg, *args, **kwargs):
         """ Error """
+        self._fix_propagate()
         if 'print_msg' in kwargs:
             del kwargs['print_msg']
             print msg
@@ -129,6 +142,7 @@ class LogHandler(object):
     @_ignore_formatting_errors()
     def debug(self, msg, *args, **kwargs):
         """ Debug """
+        self._fix_propagate()
         if 'print_msg' in kwargs:
             del kwargs['print_msg']
             print msg
@@ -137,6 +151,7 @@ class LogHandler(object):
     @_ignore_formatting_errors()
     def warning(self, msg, *args, **kwargs):
         """ Warning """
+        self._fix_propagate()
         if 'print_msg' in kwargs:
             del kwargs['print_msg']
             print msg
@@ -145,6 +160,7 @@ class LogHandler(object):
     @_ignore_formatting_errors()
     def log(self, msg, *args, **kwargs):
         """ Log """
+        self._fix_propagate()
         if 'print_msg' in kwargs:
             del kwargs['print_msg']
             print msg
@@ -153,6 +169,7 @@ class LogHandler(object):
     @_ignore_formatting_errors()
     def critical(self, msg, *args, **kwargs):
         """ Critical """
+        self._fix_propagate()
         if 'print_msg' in kwargs:
             del kwargs['print_msg']
             print msg
@@ -161,6 +178,7 @@ class LogHandler(object):
     @_ignore_formatting_errors()
     def exception(self, msg, *args, **kwargs):
         """ Exception """
+        self._fix_propagate()
         if 'print_msg' in kwargs:
             del kwargs['print_msg']
             print msg

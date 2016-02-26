@@ -16,6 +16,7 @@
 """
 Basic test module
 """
+import sys
 import uuid
 import time
 from unittest import TestCase
@@ -31,7 +32,7 @@ from ovs.dal.hybrids.t_testdisk import TestDisk
 from ovs.dal.hybrids.t_testemachine import TestEMachine
 from ovs.dal.datalist import DataList
 from ovs.dal.helpers import Descriptor
-from ovs.extensions.generic.volatilemutex import VolatileMutex
+from ovs.extensions.generic.volatilemutex import VolatileMutex, NoLockAvailableException
 
 
 class Basic(TestCase):
@@ -679,7 +680,7 @@ class Basic(TestCase):
         mutex.release()
         mutex.release()  # Should not raise errors
         mutex._volatile.add(mutex.key(), 1, 10)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(NoLockAvailableException):
             mutex.acquire(wait=1)
         mutex._volatile.delete(mutex.key())
         mutex.acquire()
@@ -1220,7 +1221,7 @@ class Basic(TestCase):
         machine.save()
         guid = machine.guid
 
-        machine = TestMachine(machine.guid, hook=update)
+        machine = TestMachine(machine.guid, _hook=update)
         self.assertEqual(machine.name, 'one', 'The machine\'s name should still be one')
         self.assertFalse(machine._metadata['cache'], 'The machine should be loaded from persistent store')
         machine = TestMachine(machine.guid)
@@ -1245,7 +1246,7 @@ class Basic(TestCase):
         guid = machine.guid
 
         with self.assertRaises(ObjectNotFoundException):
-            _ = TestMachine(guid, hook=delete)
+            _ = TestMachine(guid, _hook=delete)
 
     def test_object_save_reverseindex_build(self):
         """
@@ -1336,8 +1337,108 @@ class Basic(TestCase):
             self.assertIn(key, enum, '{0} should be in the enumerator'.format(key))
             self.assertEqual(getattr(enum, key), value, "Value for key '{0}' should be '{1}' instead of '{2}'".format(key, value, getattr(enum, key)))
 
+    def test_pop_and_remove_from_dataobjectlist(self):
+        """
+        Removes multiple items from a data-object list
+        """
+        disk1 = TestDisk()
+        disk2 = TestDisk()
+        disk1.name = 'disk1'
+        disk2.name = 'disk2'
+        disk1.save()
+        disk2.save()
+
+        data = DataList({'object': TestDisk,
+                         'data': DataList.select.GUIDS,
+                         'query': {'type': DataList.where_operator.AND,
+                                   'items': []}}).data
+        datalist1 = DataObjectList(data, TestDisk)
+        self.assertEqual(len(datalist1), 2, 'Expected 2 items in list')
+        # Remove from list by specifying object itself
+        datalist1.remove(disk1)
+        self.assertEqual(len(datalist1), 1, 'Expected 1 item in list')
+        with self.assertRaises(ValueError):
+            datalist1.remove(disk1)
+        # Remove from list by specifying guid of object
+        datalist1.remove(disk2.guid)
+        self.assertEqual(len(datalist1), 0, 'Expected 0 items in list')
+        # Raise error by specifying incorrect object type
+        machine1 = TestMachine()
+        machine1.name = 'machine1'
+        machine1.save()
+        with self.assertRaises(TypeError):
+            datalist1.remove(machine1)
+
+        data = DataList({'object': TestDisk,
+                         'data': DataList.select.GUIDS,
+                         'query': {'type': DataList.where_operator.AND,
+                                   'items': []}}).data
+        datalist2 = DataObjectList(data, TestDisk)
+        self.assertEqual(len(datalist2), 2, 'Expected 2 items in list')
+        # Raise error by attempting to pop item which does not exist
+        with self.assertRaises(IndexError):
+            datalist2.pop(3)
+            datalist2.pop(-3)
+        # Raise error by attempting to specify non-integer index
+        with self.assertRaises(ValueError):
+            datalist2.pop('test')
+        # Pop all items by using 0 and a negative index
+        datalist2.pop(0)
+        datalist2.pop(-1)
+        self.assertEqual(len(datalist2), 0, 'Expected 0 items in list')
+        # Raise error by attempting to pop from empty list
+        with self.assertRaises(IndexError):
+            datalist2.pop(0)
+
+    def test_error_during_save(self):
+        """
+        Validates whether an error during save doesn't leave the system in an inconsistent state
+        """
+        def raise_error():
+            raise RuntimeError()
+        machine = TestMachine()
+        machine.name = 'machine'
+        machine.save()
+        disk1 = TestDisk()
+        disk1.name = 'disk1'
+        disk1.machine = machine
+        disk1.save()
+        disk2 = TestDisk()
+        disk2.name = 'disk2'
+        disk2.machine = machine
+        try:
+            disk2.save(_hook=raise_error)
+        except RuntimeError:
+            pass
+        self.assertEqual(len(machine.disks), 1, 'There should be one disk')
+        for disk in machine.disks:
+            disk.delete()
+        machine.delete()
+
+    def test_shuffle_object_list(self):
+        """
+        Shuffle a data-object list randomly
+        """
+        for i in range(10):
+            disk = TestDisk()
+            disk.name = 'disk{0}'.format(i)
+            disk.save()
+
+        data = DataList({'object': TestDisk,
+                         'data': DataList.select.GUIDS,
+                         'query': {'type': DataList.where_operator.AND,
+                                   'items': []}}).data
+        datalist = DataObjectList(data, TestDisk)
+        starting_order = [disk.name for disk in datalist]
+
+        datalist.shuffle()
+        new_order = [disk.name for disk in datalist]
+
+        self.assertNotEqual(starting_order, new_order, 'Data-object list still has same order after shuffling')
+        self.assertEqual(set(starting_order), set(new_order), 'Items disappeared from the data-object list after shuffling')
 
 if __name__ == '__main__':
     import unittest
     suite = unittest.TestLoader().loadTestsFromTestCase(Basic)
-    unittest.TextTestRunner(verbosity=2).run(suite)
+    result = not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful()
+    sys.exit(result)

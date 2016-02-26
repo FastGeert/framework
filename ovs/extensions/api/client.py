@@ -67,7 +67,8 @@ class OVSClient(object):
         if self.client_id is not None and self._token is None:
             self._connect()
 
-        headers = {'Accept': 'application/json; version={0}'.format(self._version)}
+        headers = {'Accept': 'application/json; version={0}'.format(self._version),
+                   'Content-Type': 'application/json'}
         if self._token is not None:
             headers['Authorization'] = 'Bearer {0}'.format(self._token)
 
@@ -106,7 +107,11 @@ class OVSClient(object):
     def get(self, api, params=None):
         """
         Executes a GET call
+        :param api: Specification for to fill out in the URL, eg: /vpools/<vpool_guid>/sync_vmachines
+        :param params: Additional query parameters, eg: _dynamics
         """
+        if not api.endswith('/'):
+            api += '/'
         headers, url = self._prepare(params=params)
         return self._process(requests.get(url=url.format(api),
                                           headers=headers,
@@ -115,7 +120,12 @@ class OVSClient(object):
     def post(self, api, data=None, params=None):
         """
         Executes a POST call
+        :param api: Specification for to fill out in the URL, eg: /vpools/<vpool_guid>/sync_vmachines
+        :param data: Data to post
+        :param params: Additional query parameters, eg: _dynamics
         """
+        if not api.endswith('/'):
+            api += '/'
         headers, url = self._prepare(params=params)
         return self._process(requests.post(url=url.format(api),
                                            data=data,
@@ -125,7 +135,12 @@ class OVSClient(object):
     def put(self, api, data=None, params=None):
         """
         Executes a PUT call
+        :param api: Specification for to fill out in the URL, eg: /vpools/<vpool_guid>/sync_vmachines
+        :param data: Data to put
+        :param params: Additional query parameters, eg: _dynamics
         """
+        if not api.endswith('/'):
+            api += '/'
         headers, url = self._prepare(params=params)
         return self._process(requests.put(url=url.format(api),
                                           data=data,
@@ -135,7 +150,12 @@ class OVSClient(object):
     def patch(self, api, data=None, params=None):
         """
         Executes a PATCH call
+        :param api: Specification for to fill out in the URL, eg: /vpools/<vpool_guid>/sync_vmachines
+        :param data: Data to patch
+        :param params: Additional query parameters, eg: _dynamics
         """
+        if not api.endswith('/'):
+            api += '/'
         headers, url = self._prepare(params=params)
         return self._process(requests.patch(url=url.format(api),
                                             data=data,
@@ -145,6 +165,8 @@ class OVSClient(object):
     def wait_for_task(self, task_id, timeout=None):
         """
         Waits for a task to complete
+        :param task_id: Task to wait for
+        :param timeout: Time to wait for task before raising
         """
         start = time.time()
         task_metadata = {'ready': False}

@@ -33,6 +33,7 @@ define([
 
         // Observables
         self.backendConnection  = ko.observable();
+        self.backendPreset      = ko.observable();
         self.backendLogin       = ko.observable();
         self.backendRead        = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatBytes });
         self.backendReadSpeed   = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatSpeed });
@@ -48,13 +49,16 @@ define([
         self.iops               = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatNumber });
         self.loaded             = ko.observable(false);
         self.loading            = ko.observable(false);
+        self.metadata           = ko.observable();
         self.name               = ko.observable();
         self.rdmaEnabled        = ko.observable();
         self.readSpeed          = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatSpeed });
         self.size               = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatBytes });
+        self.status             = ko.observable();
         self.storageDriverGuids = ko.observableArray([]);
         self.storageRouterGuids = ko.observableArray([]);
         self.storedData         = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatBytes });
+        self.totalCacheHits     = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatNumber });
         self.vDisks             = ko.observableArray([]);
         self.vMachines          = ko.observableArray([]);
         self.writeSpeed         = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatSpeed });
@@ -82,9 +86,14 @@ define([
         self.fillData = function(data, options) {
             options = options || {};
             generic.trySet(self.name, data, 'name');
+            generic.trySet(self.status, data, 'status');
             generic.trySet(self.storedData, data, 'stored_data');
             generic.trySet(self.size, data, 'size');
+            generic.trySet(self.metadata, data, 'metadata');
             generic.trySet(self.backendConnection, data, 'connection');
+            if (data.hasOwnProperty('metadata') && data.metadata.hasOwnProperty('preset')) {
+                self.backendPreset(data.metadata.preset);
+            }
             generic.trySet(self.backendLogin, data, 'login');
             generic.trySet(self.rdmaEnabled, data, 'rdma_enabled');
             if (data.hasOwnProperty('backend_type_guid')) {
@@ -108,6 +117,7 @@ define([
                 self.iops(stats['4k_operations_ps']);
                 self.cacheHits(stats.cache_hits_ps);
                 self.cacheMisses(stats.cache_misses_ps);
+                self.totalCacheHits(stats.cache_hits);
                 self.readSpeed(stats.data_read_ps);
                 self.writeSpeed(stats.data_written_ps);
                 self.backendWritten(stats.backend_data_written);
@@ -223,6 +233,8 @@ define([
                         self.backendType().load()
                             .then(deferred.resolve)
                             .fail(deferred.reject);
+                    } else {
+                        deferred.resolve();
                     }
                 } else {
                     self.backendType(undefined);

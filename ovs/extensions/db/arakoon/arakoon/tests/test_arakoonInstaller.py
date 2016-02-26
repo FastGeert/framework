@@ -53,7 +53,7 @@ class TestArakoonInstaller(TestCase):
 
     def test_single_node(self):
         node = sorted(TestArakoonInstaller.nodes.keys())[0]
-        result = ArakoonInstaller.create_cluster(TestArakoonInstaller.cluster_name, node, [], '/tmp/db')
+        result = ArakoonInstaller.create_cluster(TestArakoonInstaller.cluster_name, node, '/tmp/db')
         contents = SSHClient(node).file_read(TestArakoonInstaller.cluster_config_file)
         expected = TestArakoonInstaller.expected_global.format(TestArakoonInstaller.nodes[node], TestArakoonInstaller.cluster_name)
         expected += TestArakoonInstaller.expected_base.format(TestArakoonInstaller.nodes[node], result['client_port'], result['messaging_port'], TestArakoonInstaller.cluster_name, node)
@@ -63,9 +63,9 @@ class TestArakoonInstaller(TestCase):
         nodes = sorted(TestArakoonInstaller.nodes.keys())
         nodes = dict((node, SSHClient(node)) for node in nodes)
         first_node = nodes.keys()[0]
-        result = ArakoonInstaller.create_cluster(TestArakoonInstaller.cluster_name, first_node, [], '/tmp/db')
+        result = ArakoonInstaller.create_cluster(TestArakoonInstaller.cluster_name, first_node, '/tmp/db')
         for node in nodes.keys()[1:]:
-            ArakoonInstaller.extend_cluster(first_node, node, TestArakoonInstaller.cluster_name, [], '/tmp/db')
+            ArakoonInstaller.extend_cluster(first_node, node, TestArakoonInstaller.cluster_name, '/tmp/db')
         expected = TestArakoonInstaller.expected_global.format(','.join(TestArakoonInstaller.nodes[node] for node in nodes), TestArakoonInstaller.cluster_name)
         for node in nodes:
             expected += TestArakoonInstaller.expected_base.format(TestArakoonInstaller.nodes[node], result['client_port'], result['messaging_port'], TestArakoonInstaller.cluster_name, node)
@@ -73,7 +73,7 @@ class TestArakoonInstaller(TestCase):
         for node, client in nodes.iteritems():
             contents = client.file_read(TestArakoonInstaller.cluster_config_file)
             self.assertEqual(contents.strip(), expected.strip())
-        ArakoonInstaller.shrink_cluster(nodes.keys()[1], first_node, TestArakoonInstaller.cluster_name)
+        ArakoonInstaller.shrink_cluster(first_node, TestArakoonInstaller.cluster_name)
         expected = TestArakoonInstaller.expected_global.format(','.join(TestArakoonInstaller.nodes[node] for node in nodes[1:]), TestArakoonInstaller.cluster_name)
         for node in nodes.keys()[1:]:
             expected += TestArakoonInstaller.expected_base.format(TestArakoonInstaller.nodes[node], result['client_port'], result['messaging_port'], TestArakoonInstaller.cluster_name, node)

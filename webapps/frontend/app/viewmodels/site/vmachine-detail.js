@@ -39,14 +39,15 @@ define([
             { key: 'iops',       value: $.t('ovs:generic.iops'),         width: 55        },
             { key: 'readSpeed',  value: $.t('ovs:generic.read'),         width: 100       },
             { key: 'writeSpeed', value: $.t('ovs:generic.write'),        width: 100       },
-            { key: 'dtlMode',    value: $.t('ovs:generic.dtl_status'),   width: 50        }
+            { key: 'dtlStatus',  value: $.t('ovs:generic.dtl_status'),   width: 50        }
         ];
         self.snapshotHeaders    = [
             { key: 'label',         value: $.t('ovs:generic.description'), width: undefined },
             { key: 'timestamp',     value: $.t('ovs:generic.datetime'),    width: 200       },
             { key: 'stored',        value: $.t('ovs:generic.storeddata'),  width: 110       },
             { key: 'is_automatic',  value: $.t('ovs:generic.type'),        width: 110       },
-            { key: 'is_consistent', value: $.t('ovs:generic.consistent'),  width: 100       }
+            { key: 'is_consistent', value: $.t('ovs:generic.consistent'),  width: 100       },
+            { key: 'is_sticky',     value: $.t('ovs:generic.sticky'),      width: 100       }
         ];
 
         // Handles

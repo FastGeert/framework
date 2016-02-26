@@ -14,7 +14,9 @@
 import os
 import imp
 import inspect
-from ovs.extensions.generic.configuration import Configuration
+from etcd import EtcdConnectionFailed
+from ovs.extensions.db.etcd.configuration import EtcdConfiguration
+from ovs.extensions.generic.system import System
 
 
 class Migrator(object):
@@ -22,10 +24,23 @@ class Migrator(object):
         pass
 
     @staticmethod
-    def migrate():
-        """ Executes all migrations. It keeps track of an internal "migration version" which is always increasing by one """
-
-        data = Configuration.get('ovs.core.versions') if Configuration.exists('ovs.core.versions') else {}
+    def migrate(master_ips=None, extra_ips=None):
+        """
+        Executes all migrations. It keeps track of an internal "migration version" which is always increasing by one
+        :param master_ips: IP addresses of the MASTER nodes
+        :param extra_ips: IP addresses of the EXTRA nodes
+        """
+        machine_id = System.get_my_machine_id()
+        key = '/ovs/framework/hosts/{0}/versions'.format(machine_id)
+        try:
+            data = EtcdConfiguration.get(key) if EtcdConfiguration.exists(key) else {}
+        except EtcdConnectionFailed:
+            import json  # Most likely 2.6 to 2.7 migration
+            data = {}
+            filename = '/opt/OpenvStorage/config/ovs.json'
+            if os.path.exists(filename):
+                with open(filename) as config_file:
+                    data = json.load(config_file).get('core', {}).get('versions', {})
         migrators = []
         path = os.path.join(os.path.dirname(__file__), 'migration')
         for filename in os.listdir(path):
@@ -39,9 +54,9 @@ class Migrator(object):
         end_version = 0
         for identifier, method in migrators:
             base_version = data[identifier] if identifier in data else 0
-            version = method(base_version)
+            version = method(base_version, master_ips, extra_ips)
             if version > end_version:
                 end_version = version
             data[identifier] = end_version
 
-        Configuration.set('ovs.core.versions', data)
+        EtcdConfiguration.set(key, data)

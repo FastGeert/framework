@@ -25,6 +25,7 @@ import inspect
 import subprocess
 import time
 from ovs.dal.helpers import Toolbox as HelperToolbox
+from ovs.extensions.services.service import ServiceManager
 
 
 class Toolbox(object):
@@ -33,14 +34,18 @@ class Toolbox(object):
     """
 
     regex_ip = re.compile('^(((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))$')
+    regex_guid = re.compile('^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$')
     regex_vpool = re.compile('^[0-9a-z][\-a-z0-9]{1,48}[a-z0-9]$')
+    regex_preset = re.compile('^[0-9a-zA-Z][a-zA-Z0-9]{1,18}[a-zA-Z0-9]$')
     regex_mountpoint = re.compile('^(/[a-zA-Z0-9\-_\.]+)+/?$')
-    compiled_regex_type = type(re.compile('someregex'))
+    compiled_regex_type = type(re.compile('some_regex'))
 
     @staticmethod
     def fetch_hooks(hook_type, hook):
         """
         Load hooks
+        :param hook_type: Type of hook, can be update, setup, license
+        :param hook: Sub-component of hook type, Eg: pre-install, post-install, ...
         """
         functions = []
         path = '{0}/../'.format(os.path.dirname(__file__))
@@ -62,8 +67,22 @@ class Toolbox(object):
         return functions
 
     @staticmethod
-    def verify_required_params(required_params, actual_params):
+    def verify_required_params(required_params, actual_params, exact_match=False):
+        """
+        Verify whether the actual parameters match the required parameters
+        :param required_params: Required parameters which actual parameters have to meet
+        :param actual_params: Actual parameters to check for validity
+        :param exact_match: Keys of both dictionaries must be identical
+        :return: None
+        """
         error_messages = []
+        if not isinstance(required_params, dict) or not isinstance(actual_params, dict):
+            raise RuntimeError('Required and actual parameters must be of type dictionary')
+
+        if exact_match is True:
+            for key in set(actual_params.keys()).difference(required_params.keys()):
+                error_messages.append('Missing key "{0}" in required_params'.format(key))
+
         for required_key, key_info in required_params.iteritems():
             expected_type = key_info[0]
             expected_value = key_info[1]
@@ -73,7 +92,7 @@ class Toolbox(object):
                 continue
 
             if required_key not in actual_params:
-                error_messages.append('Missing required param "{0}"'.format(required_key))
+                error_messages.append('Missing required param "{0}" in actual parameters'.format(required_key))
                 continue
 
             actual_value = actual_params[required_key]
@@ -111,6 +130,8 @@ class Toolbox(object):
     def get_hash(length=16):
         """
         Generates a random hash
+        :param length: Length of hash to generate
+        :return: Randomly generated hash of length characters
         """
         return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
@@ -118,6 +139,11 @@ class Toolbox(object):
     def retry_client_run(client, command, max_count=5, time_sleep=5, logger=None):
         """
         Retry a client run command, catch CalledProcessError
+        :param client: SSHClient
+        :param command: Command to retry
+        :param max_count: Maximum retries
+        :param time_sleep: Seconds of sleep in between tries
+        :param logger: LogHandler Object
         """
         cpe = None
         retry = 0
@@ -131,3 +157,43 @@ class Toolbox(object):
                 retry += 1
         if cpe:
             raise cpe
+
+    @staticmethod
+    def change_service_state(client, name, state, logger=None):
+        """
+        Starts/stops/restarts a service
+        :param client: SSHClient on which to connect and change service state
+        :param name: Name of the service
+        :param state: State to put the service in
+        :param logger: LogHandler Object
+        """
+        action = None
+        # Enable service before changing the state
+        status = ServiceManager.is_enabled(name, client=client)
+        if status is False:
+            if logger is not None:
+                logger.debug('  {0:<15} - Enabling service {1}'.format(client.ip, name))
+            ServiceManager.enable_service(name, client=client)
+
+        status = ServiceManager.get_service_status(name, client=client)
+        if status is False and state in ['start', 'restart']:
+            if logger is not None:
+                logger.debug('  {0:<15} - Starting service {1}'.format(client.ip, name))
+            ServiceManager.start_service(name, client=client)
+            action = 'started'
+        elif status is True and state == 'stop':
+            if logger is not None:
+                logger.debug('  {0:<15} - Stopping service {1}'.format(client.ip, name))
+            ServiceManager.stop_service(name, client=client)
+            action = 'stopped'
+        elif status is True and state == 'restart':
+            if logger is not None:
+                logger.debug('  {0:<15} - Restarting service {1}'.format(client.ip, name))
+            ServiceManager.restart_service(name, client=client)
+            action = 'restarted'
+
+        if action is None:
+            print '  [{0}] {1} already {2}'.format(client.ip, name, 'running' if status is True else 'halted')
+        else:
+            logger.debug('  {0:<15} - Service {1} {2}'.format(client.ip, name, action))
+            print '  [{0}] {1} {2}'.format(client.ip, name, action)

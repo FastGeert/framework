@@ -15,8 +15,8 @@
 define([
     'jquery', 'knockout',
     'ovs/generic', 'ovs/api', 'ovs/shared',
-    'viewmodels/containers/vdisk', 'viewmodels/containers/disk', 'viewmodels/containers/pmachine', 'viewmodels/containers/failuredomain'
-], function($, ko, generic, api, shared, VDisk, Disk, PMachine, FailureDomain) {
+    'viewmodels/containers/vdisk', 'viewmodels/containers/disk', 'viewmodels/containers/pmachine'
+], function($, ko, generic, api, shared, VDisk, Disk, PMachine) {
     "use strict";
     return function(guid) {
         var self = this;
@@ -49,7 +49,6 @@ define([
         self.disks                      = ko.observableArray([]);
         self.disksLoaded                = ko.observable(false);
         self.downloadLogState           = ko.observable($.t('ovs:support.downloadlogs'));
-        self.dtlMode                    = ko.observable();
         self.edit                       = ko.observable(false);
         self.guid                       = ko.observable(guid);
         self.iops                       = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatNumber });
@@ -69,6 +68,7 @@ define([
         self.secondaryFailureDomainGuid = ko.observable();
         self.status                     = ko.observable();
         self.storedData                 = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatBytes });
+        self.totalCacheHits             = ko.observable().extend({ smooth: {} }).extend({ format: generic.formatNumber });
         self.updates                    = ko.observable();
         self.vDisks                     = ko.observableArray([]);
         self.versions                   = ko.observable();
@@ -198,7 +198,6 @@ define([
             generic.trySet(self.ipAddress, data, 'ip');
             generic.trySet(self.machineId, data, 'machineid');
             generic.trySet(self.status, data, 'status', generic.lower);
-            generic.trySet(self.dtlMode, data, 'dtl_mode', generic.lower);
             generic.trySet(self.nodeType, data, 'node_type');
             generic.trySet(self.rdmaCapable, data, 'rdma_capable');
             if (data.hasOwnProperty('last_heartheat')) {
@@ -265,6 +264,7 @@ define([
                 self.cacheHits(stats.cache_hits_ps);
                 self.cacheMisses(stats.cache_misses_ps);
                 self.readSpeed(stats.data_read_ps);
+                self.totalCacheHits(stats.cache_hits);
                 self.writeSpeed(stats.data_written_ps);
                 self.backendWritten(stats.backend_data_written);
                 self.backendRead(stats.backend_data_read);
