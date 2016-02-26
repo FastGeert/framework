@@ -582,6 +582,7 @@ define(['jquery', 'jqp/pnotify'], function($) {
         return stringStartsWith(this, searchString);
     };
     return {
+        activateHook: activateHook,
         advancedSort: advancedSort,
         alert: alert,
         alertError: alertError,
@@ -591,7 +592,10 @@ define(['jquery', 'jqp/pnotify'], function($) {
         buildString: buildString,
         ceil: ceil,
         crossFiller: crossFiller,
+        deactivateHook: deactivateHook,
         deg2rad: deg2rad,
+        extract: extract,
+        findElement: findElement,
         formatBytes: formatBytes,
         formatNumber: formatNumber,
         formatPercentage: formatPercentage,
@@ -603,7 +607,10 @@ define(['jquery', 'jqp/pnotify'], function($) {
         getHash: getHash,
         getLocalTime: getLocalTime,
         getTimestamp: getTimestamp,
+        isEmpty: isEmpty,
         keys: keys,
+        loadHookElements: loadHookElements,
+        log: log,
         lower: lower,
         merge: merge,
         numberSort: numberSort,
@@ -612,7 +619,6 @@ define(['jquery', 'jqp/pnotify'], function($) {
         padRight: padRight,
         removeCookie: removeCookie,
         removeElement: removeElement,
-        findElement: findElement,
         round: round,
         setCookie: setCookie,
         setDecimals: setDecimals,
@@ -621,15 +627,9 @@ define(['jquery', 'jqp/pnotify'], function($) {
         tryGet: tryGet,
         tryRGet: tryRGet,
         trySet: trySet,
+        unloadHookElements: unloadHookElements,
         validate: validate,
         xhrAbort: xhrAbort,
-        xhrCompleted: xhrCompleted,
-        isEmpty: isEmpty,
-        extract: extract,
-        activateHook: activateHook,
-        deactivateHook: deactivateHook,
-        loadHookElements: loadHookElements,
-        unloadHookElements: unloadHookElements,
-        log: log
+        xhrCompleted: xhrCompleted
     };
 });

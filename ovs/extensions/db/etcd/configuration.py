@@ -234,7 +234,8 @@ class EtcdConfiguration(object):
                                          'password': '0penv5tor4ge',
                                          'queues': {'storagedriver': 'volumerouter'}},
                        '/plugins/installed': {'backends': [],
-                                              'generic': []},
+                                              'generic': [],
+                                              'snapshot': []},
                        '/stores': {'persistent': 'pyrakoon',
                                    'volatile': 'memcache'},
                        '/paths': {'cfgdir': '/opt/OpenvStorage/config',
@@ -292,12 +293,12 @@ class EtcdConfiguration(object):
             data = json.dumps(value)
         client.write(key, data)
         try:
-            def escape(*args, **kwargs):
+            def _escape(*args, **kwargs):
                 _ = args, kwargs
                 raise RuntimeError()
             from ovs.extensions.storage.persistentfactory import PersistentFactory
             client = PersistentFactory.get_client()
-            signal.signal(signal.SIGALRM, escape)
+            signal.signal(signal.SIGALRM, _escape)
             signal.alarm(0.5)  # Wait only 0.5 seconds. This is a backup and should not slow down the system
             client.set(key, value)
             signal.alarm(0)

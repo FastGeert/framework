@@ -16,13 +16,10 @@
 ScheduledTaskController module
 """
 
-import copy
 import time
 from celery.result import ResultSet
 from celery.schedules import crontab
 from ConfigParser import RawConfigParser
-from datetime import datetime
-from datetime import timedelta
 from ovs.celery_run import celery
 from ovs.dal.hybrids.diskpartition import DiskPartition
 from ovs.dal.hybrids.vdisk import VDisk
@@ -42,7 +39,6 @@ from ovs.lib.vdisk import VDiskController
 from ovs.lib.vmachine import VMachineController
 from ovs.log.logHandler import LogHandler
 from StringIO import StringIO
-from time import mktime
 from volumedriver.storagerouter import storagerouterclient
 
 logger = LogHandler.get('lib', name='scheduled tasks')
@@ -51,6 +47,7 @@ storagerouterclient.Logger.setupLogging(LogHandler.load_path('storagerouterclien
 storagerouterclient.Logger.enableLogging()
 
 SCRUBBER_LOGFILE_LOCATION = '/var/log/upstart/ovs-scrubber.log'
+
 
 class ScheduledTaskController(object):
     """
@@ -61,12 +58,12 @@ class ScheduledTaskController(object):
     @staticmethod
     @celery.task(name='ovs.scheduled.snapshot_all_vms', schedule=crontab(minute='0', hour='2-22'))
     @ensure_single(task_name='ovs.scheduled.snapshot_all_vms', extra_task_names=['ovs.scheduled.delete_snapshots'])
-    def snapshot_all():
+    def snapshot_all_vms():
         """
         Snapshots all VMachines
         """
         logger.info('[SSA] Started')
-        if len(Configuration.get('ovs.plugins.snapshot')) > 0:
+        if len(EtcdConfiguration.get('/ovs/framework/plugins/installed|snapshot')) > 0:
             logger.info('[SSA] Build-in snapshotting aborted. Snapshot plugin registered')
             return
 
@@ -97,11 +94,9 @@ class ScheduledTaskController(object):
         < 1w | 1d bucket | 6 | oldest of bucket | 7d = 1w
         < 1m | 1w bucket | 3 | oldest of bucket | 4w = 1m
         > 1m | delete
-
-        :param timestamp: Timestamp to determine whether snapshots should be kept or not, if none provided, current time will be used
         """
         logger.info('Delete snapshots started')
-        if len(Configuration.get('ovs.plugins.snapshot')) > 0:
+        if len(EtcdConfiguration.get('/ovs/framework/plugins/installed|snapshot')) > 0:
             logger.info('Delete snapshots aborted. Snapshot plugin registered')
             return
 
@@ -109,6 +104,8 @@ class ScheduledTaskController(object):
         for vmachine in VMachineList.get_customer_vmachines():
             if any(vd.info['object_type'] in ['BASE'] for vd in vmachine.vdisks):
                 for snapshot in vmachine.snapshots:
+                    if snapshot.get('is_sticky') is True:
+                        continue
                     if int(snapshot['timestamp']) < mark:
                         for diskguid, snapshotguid in snapshot['snapshots'].iteritems():
                             VDiskController.delete_snapshot(diskguid=diskguid,
@@ -116,6 +113,8 @@ class ScheduledTaskController(object):
         for vdisk in VDiskList.get_without_vmachine():
             if vdisk.info['object_type'] in ['BASE']:
                 for snapshot in vdisk.snapshots:
+                    if snapshot.get('is_sticky') is True:
+                        continue
                     if int(snapshot['timestamp']) < mark:
                         VDiskController.delete_snapshot(diskguid=vdisk.guid,
                                                         snapshotid=snapshot['guid'])
