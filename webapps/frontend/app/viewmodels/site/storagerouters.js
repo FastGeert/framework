@@ -29,20 +29,20 @@ define([
         self.pMachineCache         = {};
         self.fdCache               = {};
         self.storageRoutersHeaders = [
-            { key: 'status',      value: $.t('ovs:generic.status'),                      width: 60        },
-            { key: 'name',        value: $.t('ovs:generic.name'),                        width: 100       },
-            { key: 'ip',          value: $.t('ovs:generic.ip'),                          width: 100       },
-            { key: 'host',        value: $.t('ovs:generic.host'),                        width: 55        },
-            { key: 'type',        value: $.t('ovs:generic.type'),                        width: 55        },
-            { key: 'vdisks',      value: $.t('ovs:generic.vdisks'),                      width: 55        },
-            { key: 'storedData',  value: $.t('ovs:generic.storeddata'),                  width: 96        },
-            { key: 'cacheRatio',  value: $.t('ovs:generic.cache'),                       width: 80        },
-            { key: 'iops',        value: $.t('ovs:generic.iops'),                        width: 55        },
-            { key: 'readSpeed',   value: $.t('ovs:generic.read'),                        width: 100       },
-            { key: 'writeSpeed',  value: $.t('ovs:generic.write'),                       width: 100       },
-            { key: 'primaryFD',   value: $.t('ovs:generic.failure_domain_short'),        width: 100       },
-            { key: 'secondaryFD', value: $.t('ovs:generic.backup_failure_domain_short'), width: 100       },
-            { key: 'scrub',       value: $.t('ovs:generic.scrub'),                       width: undefined }
+            { key: 'status',                       value: $.t('ovs:generic.status'),                      sort: true,  width: 90        },
+            { key: 'name',                         value: $.t('ovs:generic.name'),                        sort: true,  width: 100       },
+            { key: 'ip',                           value: $.t('ovs:generic.ip'),                          sort: true,  width: 100       },
+            { key: 'pmachine.name',                value: $.t('ovs:generic.host'),                        sort: true,  width: 55        },
+            { key: 'pmachine.hvtype',              value: $.t('ovs:generic.type'),                        sort: true,  width: 70        },
+            { key: 'vdisks',                       value: $.t('ovs:generic.vdisks'),                      sort: false, width: 55        },
+            { key: 'stored_data',                  value: $.t('ovs:generic.storeddata_short'),            sort: true,  width: 96        },
+            { key: 'cacheRatio',                   value: $.t('ovs:generic.cache'),                       sort: false, width: 80        },
+            { key: 'statistics[4k_operations_ps]', value: $.t('ovs:generic.iops'),                        sort: true,  width: 85        },
+            { key: 'statistics[data_read_ps]',     value: $.t('ovs:generic.read'),                        sort: true,  width: 100       },
+            { key: 'statistics[data_written_ps]',  value: $.t('ovs:generic.write'),                       sort: true,  width: 100       },
+            { key: 'primary_failure_domain.name',  value: $.t('ovs:generic.failure_domain_short'),        sort: true,  width: 100       },
+            { key: 'secondaryFD',                  value: $.t('ovs:generic.backup_failure_domain_short'), sort: false, width: 100       },
+            { key: 'scrub',                        value: $.t('ovs:generic.scrub'),                       sort: false, width: undefined }
         ];
 
         // Observables
@@ -57,7 +57,7 @@ define([
         self.storageRouterHandle  = undefined;
 
         // Functions
-        self.loadStorageRouters = function(page) {
+        self.loadStorageRouters = function(page, sort) {
             return $.Deferred(function(deferred) {
                 if (generic.xhrCompleted(self.storageRoutersHandle[page])) {
                     var options = {
@@ -65,6 +65,9 @@ define([
                         page: page,
                         contents: '_relations,statistics,stored_data,vdisks_guids,status,partition_config'
                     };
+                    if (sort !== undefined) {
+                        options.sort = sort;
+                    }
                     self.storageRoutersHandle[page] = api.get('storagerouters', { queryparams: options })
                         .done(function(data) {
                             deferred.resolve({

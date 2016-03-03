@@ -18,8 +18,8 @@ limitations under the License.
         <thead>
             <tr data-bind="foreach: headers">
                 <th data-bind="style: { width: width !== undefined ? width + 'px' : 'auto' },
-                               click: $parent.sort, css: { 'hand': $parent.sortable() }">
-                    <span data-bind="html: value, css: { 'hand': $parent.sortable() }"></span>
+                               click: $parent.sort, css: { 'hand': $parent.sortable() && $parent.sorting().fields[key] }">
+                    <span data-bind="html: value, css: { 'hand': $parent.sortable() && $parent.sorting().fields[key] }"></span>
                     <!-- ko if: $parent.sorting().directions.hasOwnProperty(key) -->
                         <i data-bind="translate: 'ovs:icons.' + ($parent.sorting().directions[key] ? 'down' : 'up'),
                                       css: { 'hand': $parent.sortable() }" class="fa fa-fw"></i>

@@ -17,7 +17,10 @@ limitations under the License.
     <div>
         <h2 class="pull-left" data-i18n="ovs:storagerouters.title"></h2>
     </div>
-    <div data-bind="pager: { loadData: loadStorageRouters, headers: storageRoutersHeaders, refreshInterval: 5000, controls: true }">
+    <div data-bind="pager: {
+                        loadData: loadStorageRouters, headers: storageRoutersHeaders, refreshInterval: 5000, controls: true,
+                        sortable: true, sorting: 'name'
+                    }">
         <table data-dummy="dummy">
             <tr data-part="vitem" data-bind="attr: { id: 'storagerouter_' + guid() }">
                 <td style="position: relative;">

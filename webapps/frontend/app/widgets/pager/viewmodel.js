@@ -269,6 +269,9 @@ define([
                 return;
             }
             var key = data.key, value, sorting = self.sorting();
+            if (sorting.fields[key] === false) {
+                return;
+            }
             if (event.ctrlKey) {
                 if (sorting.directions.hasOwnProperty(key)) {
                     value = sorting.directions[key];
@@ -286,11 +289,13 @@ define([
                 if (sorting.directions.hasOwnProperty(key)) {
                     value = sorting.directions[key];
                     sorting = {sequence: [key],
-                               directions: {}};
+                               directions: {},
+                               fields: sorting.fields};
                     sorting.directions[key] = !value;
                 } else {
                     sorting = {sequence: [key],
-                               directions: {}};
+                               directions: {},
+                               fields: sorting.fields};
                     sorting.directions[key] = true;
                 }
             }
@@ -323,7 +328,8 @@ define([
             self.sortable(generic.tryGet(settings, 'sortable', false));
             if (self.sortable() === true) {
                 var sorting = {sequence: [],
-                               directions: {}}, key;
+                               directions: {},
+                               fields: {}}, key;
                 if (settings.hasOwnProperty('sorting')) {
                     $.each(settings.sorting.split(','), function(index, item) {
                         key = item[0] === '-' ? item.substring(1) : item;
@@ -335,6 +341,9 @@ define([
                     sorting.sequence = [key];
                     sorting.directions[key] = true;
                 }
+                $.each(self.headers(), function(index, header) {
+                    sorting.fields[header.key] = header.sort !== false;
+                });
                 self.sorting(sorting);
             }
 
