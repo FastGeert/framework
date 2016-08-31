@@ -908,7 +908,9 @@ class VDiskController(object):
                 current_sr = None
                 available_primary_srs = available_primary_srs.difference(available_secondary_srs)
                 if current_dtl_config is not None:
-                    current_sr = [sd for sd in vpool.storagedrivers if sd.storage_ip == current_dtl_config.host][0].storagerouter
+                    current_srs = [sd for sd in vpool.storagedrivers if sd.storage_ip == current_dtl_config.host]
+                    if current_srs:
+                        current_sr = current_srs[0].storagerouter
 
                 for importance, possible_srs in {'secondary': possible_secondary_srs,
                                                  'primary': possible_primary_srs}.iteritems():
